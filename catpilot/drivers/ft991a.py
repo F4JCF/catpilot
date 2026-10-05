@@ -62,6 +62,7 @@ PARAMS = {
     "info":      P("IF;", 2, "if"),                      # canal, clarifier, VFO/mémoire
 }
 SLOW_PER_CYCLE = 3
+RETRY_AFTER = 8.0      # s avant de réessayer un réglage refusé par le poste
 
 ACTIONS = {
     "swap": "SV;", "a_to_b": "AB;", "b_to_a": "BA;", "vm": "VM;",
@@ -97,7 +98,8 @@ class FT991A(RigDriver):
         self._keys = list(PARAMS)
         self._slow = 0
         self._fails = {}
-        self.unsupported = set()
+        self.unsupported = {}      # réglage -> heure du refus
+        self._context = None       # (mode, gamme de fréquence) au dernier cycle
         self._mem_cmd = "MT"
 
     # --- échanges bas niveau ------------------------------------------------
@@ -137,6 +139,13 @@ class FT991A(RigDriver):
             st.s_db = round(interp(SM_CAL, raw))
             st.s_text = s_text_from_db(st.s_db)
             st.po = st.swr = st.alc = st.swr_val = 0.0
+        # Beaucoup de refus dépendent du contexte (ATT ou DNR en FM/UHF, shift en FM...).
+        # Au changement de mode ou de gamme, on redonne sa chance à tout le monde.
+        ctx = (st.mode, 0 if st.freq < 60_000_000 else 1 if st.freq < 300_000_000 else 2)
+        if ctx != self._context:
+            self._context = ctx
+            self.unsupported.clear()
+            self._fails.clear()
         self._poll_slow(st)
         st.unsupported = set(self.unsupported)
 
@@ -148,7 +157,8 @@ class FT991A(RigDriver):
                 break
             key = self._keys[self._slow]
             self._slow = (self._slow + 1) % len(self._keys)
-            if key in self.unsupported:
+            refused_at = self.unsupported.get(key)
+            if refused_at is not None and time.monotonic() - refused_at < RETRY_AFTER:
                 continue
             done += 1
             p = PARAMS[key]
@@ -161,15 +171,13 @@ class FT991A(RigDriver):
                 else:
                     st.p[key] = int(body)
                 self._fails.pop(key, None)
-            except RigRefused:
-                # « ?; » peut aussi venir d'un état temporaire (ex. contour en FM)
-                self._fails[key] = self._fails.get(key, 0) + 1
-                if self._fails[key] >= 3:
-                    self.unsupported.add(key)
+                self.unsupported.pop(key, None)
             except (RigError, ValueError):
+                # « ?; » vient souvent d'un état temporaire : réglage indisponible
+                # dans ce mode ou sur cette bande. On grise et on réessaiera.
                 self._fails[key] = self._fails.get(key, 0) + 1
-                if self._fails[key] >= 3:
-                    self.unsupported.add(key)
+                if self._fails[key] >= 2:
+                    self.unsupported[key] = time.monotonic()
 
     def read_memories(self):
         out = []

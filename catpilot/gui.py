@@ -541,9 +541,14 @@ class MainWindow(QMainWindow):
         self.b_mems = QPushButton("Mémoires")
         self.b_mems.setCheckable(True)
         ll.addWidget(self.b_mems)
+        pl.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         g.addWidget(pl, 3, 0, 1, 4)
+        for r in range(3):
+            g.setRowStretch(r, 1)
+        g.setRowStretch(3, 0)
 
         g.setColumnStretch(2, 1)
+        g.setColumnStretch(3, 1)
         self.statusBar().showMessage("Choisissez le port du FT-991A puis cliquez sur Connecter")
         self.refresh_ports()
 
