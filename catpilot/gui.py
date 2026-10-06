@@ -1,23 +1,25 @@
 """Interface graphique de CAT Pilot pour Yaesu FT-991A."""
-import csv
+import datetime
 import json
 import math
+import os
 import sys
+import time
 
 import serial.tools.list_ports
 from PySide6.QtCore import QPointF, QRectF, QSettings, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
+from PySide6.QtGui import QAction, QColor, QFont, QFontMetrics, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDockWidget,
-    QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
-    QMainWindow, QMessageBox, QProgressBar, QPushButton, QSizePolicy, QSlider,
-    QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QApplication, QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout,
+    QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar,
+    QPushButton, QSizePolicy, QSlider, QSpinBox, QToolBar, QVBoxLayout, QWidget,
 )
 
 from . import __version__
 from .controller import RigController
 from .drivers import DRIVERS
 from .drivers.sim import SimDriver
+from .memdock import MemoryDock, backup_dir
 from .rigctl_server import RigctlServer
 from .waterfall import Waterfall, guess_radio_input, list_inputs
 
@@ -57,6 +59,18 @@ TONE_MODES = ["Sans tonalité", "TSQ (enc./déc.)", "Tonalité à l'émission", 
 AGC_LABELS = ["AGC OFF", "AGC FAST", "AGC MID", "AGC SLOW", "AGC AUTO"]
 PRE_LABELS = ["IPO", "AMP 1", "AMP 2"]
 
+PROFILE_KEYS = ["pwr", "width", "shift", "nar", "nb", "dnr", "dnr_lvl", "dnf", "agc", "pre",
+                "att", "proc", "mic", "contour", "notch"]
+DEFAULT_PROFILES = {
+    "FT8 20 m": {"freq": 14074000, "mode": "PKTUSB", "pwr": 30, "dnr": False, "nb": False,
+                 "proc": False, "nar": False, "dnf": False},
+    "FT8 40 m": {"freq": 7074000, "mode": "PKTUSB", "pwr": 30, "dnr": False, "nb": False,
+                 "proc": False, "nar": False, "dnf": False},
+    "BLU 40 m": {"freq": 7130000, "mode": "LSB", "pwr": 100, "proc": True},
+    "BLU 20 m": {"freq": 14200000, "mode": "USB", "pwr": 100, "proc": True},
+    "FM 2 m appel": {"freq": 145500000, "mode": "FM", "pwr": 10},
+}
+
 AMBER, GREEN, RED, TEXT = "#f2b705", "#8cff3a", "#e5463b", "#e6e6e6"
 
 STYLE = f"""
@@ -91,6 +105,10 @@ QTableWidget {{ background: #000; gridline-color: #333; color: {AMBER}; selectio
 QHeaderView::section {{ background: #e8e8e8; color: #000; border: 1px solid #aaa; padding: 2px; }}
 QDockWidget {{ color: {AMBER}; font-weight: bold; }}
 QStatusBar {{ color: #bdbdbd; }}
+QToolBar {{ background: #0b0b0b; border-bottom: 1px solid #333; spacing: 6px; padding: 3px; }}
+QMenuBar {{ background: #0b0b0b; }}
+QMenuBar::item:selected, QMenu::item:selected {{ background: #333; }}
+QMenu {{ background: #111; border: 1px solid #444; }}
 QCheckBox {{ spacing: 6px; }}
 QCheckBox::indicator {{ width: 13px; height: 13px; border: 1px solid #aaa; background: #111; }}
 QCheckBox::indicator:checked {{ background: {GREEN}; }}
@@ -226,23 +244,34 @@ class MainWindow(QMainWindow):
         self.ctrl = RigController()
         self.server = None
         self.band_mem = json.loads(self.settings.value("band_mem", "{}"))
-        self.memories = []
         self.toggles, self.sliders, self.combos = {}, {}, {}
         self.controls = []
         self._updating = False
         self._last = None
+        self._state_time = 0.0
+        self._cur_band = None
+        self._last_pwr = None
+        self._tx_since = None
+        self.pwr_band = json.loads(self.settings.value("pwr_band", "{}"))
+        self.profiles = json.loads(self.settings.value("profiles", "null")) or dict(DEFAULT_PROFILES)
 
         self.ctrl.state_changed.connect(self.on_state)
         self.ctrl.status_changed.connect(self.on_status)
-        self.ctrl.memories_loaded.connect(self.on_memories)
+        self.ctrl.job_done.connect(self.on_job)
         self.ctrl.message.connect(lambda m: self.statusBar().showMessage(m))
 
         self._build_ui()
-        self._build_memory_dock()
+        self.mem = MemoryDock(self)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.mem)
+        self.mem.hide()
+        self.b_mems.toggled.connect(self.mem.setVisible)
+        self.mem.visibilityChanged.connect(self.b_mems.setChecked)
+        self._build_toolbar_and_menus()
         self._load_settings()
         self._set_enabled(False)
         t = QTimer(self)
         t.timeout.connect(self.update_clients)
+        t.timeout.connect(self.check_tx_timeout)
         t.start(1000)
 
     # --- fabriques de commandes --------------------------------------------
@@ -367,6 +396,13 @@ class MainWindow(QMainWindow):
         h.addWidget(self.b_vm)
         h.addWidget(self._btn("UP", lambda: self.step_mem_or_vfo(+1)))
         h.addWidget(self._btn("DN", lambda: self.step_mem_or_vfo(-1)))
+        h.addSpacing(10)
+        b = self._btn("QMB STO", lambda: self.ctrl.action("qmb_store"))
+        b.setToolTip("Mémoire rapide : enregistrer la fréquence actuelle")
+        h.addWidget(b)
+        b = self._btn("QMB RCL", lambda: self.ctrl.action("qmb_recall"))
+        b.setToolTip("Mémoire rapide : rappeler (clics successifs = mémoires suivantes)")
+        h.addWidget(b)
         vl.addLayout(h)
         h = QHBoxLayout()
         self.ed_freq = QLineEdit()
@@ -408,6 +444,9 @@ class MainWindow(QMainWindow):
         ml.addLayout(ah)
         self.wf = Waterfall()
         self.wf.hover.connect(self.on_wf_hover)
+        self.wf.clicked.connect(self.on_wf_click)
+        self.wf.setToolTip("Clic sur un signal (BLU, CW, DATA) : le poste s'accorde dessus.\n"
+                           "La ligne pointillée montre où le signal sera placé.")
         ml.addWidget(self.wf, 1)
         wh = QHBoxLayout()
         self.cb_audio = QComboBox()
@@ -420,12 +459,14 @@ class MainWindow(QMainWindow):
         self.sl_contrast.setRange(15, 80)
         self.sl_contrast.setValue(45)
         self.sl_contrast.setMaximumWidth(90)
+        self.sl_contrast.setMinimumWidth(60)
         self.sl_contrast.setToolTip("Contraste de la chute d'eau")
         self.sl_contrast.valueChanged.connect(lambda v: setattr(self.wf, "contrast", float(v)))
         self.sl_level = QSlider(Qt.Horizontal)
         self.sl_level.setRange(-15, 30)
         self.sl_level.setValue(5)
         self.sl_level.setMaximumWidth(90)
+        self.sl_level.setMinimumWidth(60)
         self.sl_level.setToolTip("Seuil : plus à droite, moins de bruit de fond visible")
         self.sl_level.valueChanged.connect(lambda v: setattr(self.wf, "offset", float(v)))
         self.lb_wf = QLabel("")
@@ -600,38 +641,6 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Choisissez le port du FT-991A puis cliquez sur Connecter")
         self.refresh_ports()
 
-    def _build_memory_dock(self):
-        dock = QDockWidget("Mémoires du poste", self)
-        dock.setObjectName("memdock")
-        w = QWidget()
-        v = QVBoxLayout(w)
-        self.tbl = QTableWidget(0, 6)
-        self.tbl.setHorizontalHeaderLabels(["Canal", "Nom", "Fréquence", "Mode", "Relais", "Tonalité"])
-        self.tbl.verticalHeader().setVisible(False)
-        self.tbl.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.tbl.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.tbl.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        self.tbl.horizontalHeader().setStretchLastSection(True)
-        self.tbl.cellDoubleClicked.connect(self.recall_memory)
-        self.tbl.setToolTip("Double-clic : rappeler la mémoire sur le poste")
-        v.addWidget(self.tbl, 1)
-        h = QHBoxLayout()
-        self.b_readmem = self._btn("Lire les mémoires", self.ctrl.read_memories)
-        h.addWidget(self.b_readmem)
-        h.addWidget(self._btn("Rappeler", lambda: self.recall_memory(self.tbl.currentRow(), 0)))
-        h.addStretch()
-        b = QPushButton("Exporter CSV")
-        b.clicked.connect(self.export_memories)
-        h.addWidget(b)
-        v.addLayout(h)
-        dock.setWidget(w)
-        dock.setMinimumWidth(470)
-        self.addDockWidget(Qt.RightDockWidgetArea, dock)
-        dock.hide()
-        self.mem_dock = dock
-        self.b_mems.toggled.connect(dock.setVisible)
-        dock.visibilityChanged.connect(self.b_mems.setChecked)
-
     # --- réglages ----------------------------------------------------------------
     def _load_settings(self):
         s = self.settings
@@ -653,6 +662,9 @@ class MainWindow(QMainWindow):
         self.ck_auto.setChecked(s.value("auto_connect", "true") == "true")
         self.ck_on.setChecked(s.value("power_on", "true") == "true")
         self.ck_off.setChecked(s.value("power_off", "true") == "true")
+        self.ck_pwrband.setChecked(s.value("pwr_by_band", "true") == "true")
+        self.sp_tot.setValue(int(s.value("tx_timeout", 3)))
+        self.refresh_profiles()
         if self.ck_auto.isChecked():
             QTimer.singleShot(400, self.auto_connect)
         self.sl_contrast.setValue(int(s.value("wf_contrast", 45)))
@@ -672,6 +684,11 @@ class MainWindow(QMainWindow):
         s.setValue("auto_connect", "true" if self.ck_auto.isChecked() else "false")
         s.setValue("power_on", "true" if self.ck_on.isChecked() else "false")
         s.setValue("power_off", "true" if self.ck_off.isChecked() else "false")
+        s.setValue("pwr_by_band", "true" if self.ck_pwrband.isChecked() else "false")
+        s.setValue("tx_timeout", self.sp_tot.value())
+        s.setValue("pwr_band", json.dumps(self.pwr_band))
+        s.setValue("profiles", json.dumps(self.profiles))
+        self.mem.scanning = False
         s.setValue("wf_contrast", self.sl_contrast.value())
         s.setValue("wf_level", self.sl_level.value())
         self.wf.stop()
@@ -786,8 +803,8 @@ class MainWindow(QMainWindow):
 
     def step_mem_or_vfo(self, d):
         info = self.ctrl.snapshot().p.get("info", {})
-        if info.get("vm") and self.memories:
-            chans = [m["ch"] for m in self.memories]
+        if info.get("vm") and self.mem.memories:
+            chans = [m["ch"] for m in self.mem.memories]
             cur = info.get("ch", chans[0])
             nxt = [c for c in chans if (c > cur if d > 0 else c < cur)]
             if nxt:
@@ -855,48 +872,261 @@ class MainWindow(QMainWindow):
         mhz, rest = divmod(rf, 1_000_000)
         self.lb_wf.setText(f"{audio_hz} Hz → {mhz}.{rest // 1000:03d}.{rest % 1000:03d}")
 
-    # --- mémoires ----------------------------------------------------------------------
-    def on_memories(self, mems):
-        self.memories = mems
-        self.tbl.setRowCount(len(mems))
-        for r, m in enumerate(mems):
-            shift = ["", "+", "−"][m.get("shift", 0)] if m.get("shift", 0) in (0, 1, 2) else ""
-            tone = ["", "TSQ", "Tone", "DCS"][m.get("ctcss", 0)] if m.get("ctcss", 0) in range(4) else ""
-            cells = [f"{m['ch']:03d}", m.get("tag", ""), self._fmt_f(m["freq"]),
-                     m.get("mode_label") or MODE_LABELS.get(m.get("mode"), m.get("mode", "")),
-                     shift, tone]
-            for c, txt in enumerate(cells):
-                it = QTableWidgetItem(txt)
-                it.setTextAlignment(Qt.AlignCenter if c != 1 else Qt.AlignLeft | Qt.AlignVCenter)
-                self.tbl.setItem(r, c, it)
-        self.statusBar().showMessage(f"{len(mems)} mémoires lues sur le poste")
-        self.mem_dock.show()
+    # --- barre d'outils, menus et raccourcis -----------------------------------------
+    def _build_toolbar_and_menus(self):
+        tb = QToolBar("Outils")
+        tb.setObjectName("toolbar")
+        tb.setMovable(False)
+        self.addToolBar(Qt.TopToolBarArea, tb)
+        tb.addWidget(QLabel(" Profil "))
+        self.cb_prof = QComboBox()
+        self.cb_prof.setMinimumWidth(170)
+        tb.addWidget(self.cb_prof)
+        for label, slot, tip in (("Appliquer", self.apply_profile, "Règle le poste selon le profil choisi"),
+                                 ("Enregistrer…", self.save_profile, "Crée un profil à partir des réglages actuels"),
+                                 ("Supprimer", self.delete_profile, "")):
+            b = QPushButton(label)
+            b.setToolTip(tip)
+            b.clicked.connect(slot)
+            tb.addWidget(b)
+            if label == "Appliquer":
+                self.controls.append(b)
+        tb.addSeparator()
+        self.ck_pwrband = QCheckBox("Puissance mémorisée par bande")
+        self.ck_pwrband.setToolTip("Chaque bande retrouve la dernière puissance utilisée")
+        tb.addWidget(self.ck_pwrband)
+        tb.addSeparator()
+        tb.addWidget(QLabel("Sécurité TX : coupure après "))
+        self.sp_tot = QSpinBox()
+        self.sp_tot.setRange(0, 30)
+        self.sp_tot.setSuffix(" min")
+        self.sp_tot.setSpecialValueText("désactivée")
+        self.sp_tot.setToolTip("Coupe l'émission si elle dure plus longtemps (quel que soit le logiciel)")
+        tb.addWidget(self.sp_tot)
 
-    @staticmethod
-    def _fmt_f(hz):
-        mhz, rest = divmod(int(hz), 1_000_000)
-        return f"{mhz},{rest // 1000:03d}.{rest % 1000:03d}"
+        mb = self.menuBar()
+        m = mb.addMenu("Poste")
+        for label, slot in (("Allumer et connecter", self.power_on_connect),
+                            ("Éteindre et déconnecter", self.power_off_disconnect), (None, None),
+                            ("Sauvegarder les menus du poste…", self.backup_menus),
+                            ("Restaurer les menus du poste…", self.restore_menus), (None, None),
+                            ("Ouvrir le dossier des sauvegardes", self.open_backup_dir)):
+            if label is None:
+                m.addSeparator()
+                continue
+            a = QAction(label, self)
+            a.triggered.connect(slot)
+            m.addAction(a)
+        h = mb.addMenu("Aide")
+        a = QAction("Raccourcis clavier", self)
+        a.triggered.connect(self.show_shortcuts)
+        h.addAction(a)
 
-    def recall_memory(self, row, _col):
-        if 0 <= row < len(self.memories):
-            self.ctrl.action("mem_recall", self.memories[row]["ch"])
+        def sc(keys, slot):
+            QShortcut(QKeySequence(keys), self, activated=slot)
+        sc("F12", lambda: self.b_ptt.isEnabled() and self.b_ptt.toggle())
+        sc("Ctrl+Up", lambda: self.tune_by(self.freq.default_step))
+        sc("Ctrl+Down", lambda: self.tune_by(-self.freq.default_step))
+        sc("Ctrl+Shift+Up", lambda: self.tune_by(10 * self.freq.default_step))
+        sc("Ctrl+Shift+Down", lambda: self.tune_by(-10 * self.freq.default_step))
+        sc("PgUp", lambda: self.band_step(+1))
+        sc("PgDown", lambda: self.band_step(-1))
+        sc("Ctrl+M", lambda: self.b_mems.toggle())
+        sc("Ctrl+W", lambda: self.b_wf.toggle())
+        sc("Escape", lambda: self.mem.scanning and self.mem.b_scan.setChecked(False))
 
-    def export_memories(self):
-        if not self.memories:
-            QMessageBox.information(self, "Aucune mémoire",
-                                    "Lisez d'abord les mémoires du poste.")
+    def show_shortcuts(self):
+        QMessageBox.information(self, "Raccourcis clavier", (
+            "F12 : émission (MOX) marche / arrêt\n"
+            "Ctrl + ↑ / ↓ : accord d'un pas\n"
+            "Ctrl + Maj + ↑ / ↓ : accord de 10 pas\n"
+            "Page préc. / Page suiv. : bande suivante / précédente\n"
+            "Ctrl + M : panneau des mémoires\n"
+            "Ctrl + W : chute d'eau marche / arrêt\n"
+            "Échap : arrêter le scan\n\n"
+            "Molette sur un chiffre de la fréquence : régler ce chiffre.\n"
+            "Bouton d'accord USB (ShuttleXpress, PowerMate…) : programmez-le dans son "
+            "propre logiciel pour envoyer Ctrl + ↑ et Ctrl + ↓."))
+
+    def band_step(self, d):
+        names = [b[0] for b in BANDS]
+        cur = self.band_of(self.ctrl.snapshot().freq)
+        i = names.index(cur) if cur in names else -1
+        self.goto_band(names[(i + d) % len(names)])
+
+    # --- profils ------------------------------------------------------------------------
+    def refresh_profiles(self, select=None):
+        self.cb_prof.clear()
+        self.cb_prof.addItems(sorted(self.profiles))
+        if select:
+            self.cb_prof.setCurrentText(select)
+
+    def apply_profile(self):
+        prof = self.profiles.get(self.cb_prof.currentText())
+        if not prof or not self.ctrl.connected:
             return
-        path, _ = QFileDialog.getSaveFileName(self, "Exporter les mémoires",
-                                              "memoires_ft991a.csv", "CSV (*.csv)")
+        if "freq" in prof:
+            self.ctrl.set_freq(prof["freq"])
+        if "mode" in prof:
+            self.ctrl.set_mode(prof["mode"])
+
+        def params():   # après le changement de mode, certains réglages en dépendent
+            for k in PROFILE_KEYS:
+                if k in prof:
+                    self.ctrl.set_param(k, prof[k])
+            self.statusBar().showMessage(f"Profil « {self.cb_prof.currentText()} » appliqué")
+        QTimer.singleShot(500, params)
+
+    def save_profile(self):
+        if not self.ctrl.connected:
+            QMessageBox.information(self, "Profil", "Connectez d'abord le poste : le profil reprend ses réglages actuels.")
+            return
+        name, ok = QInputDialog.getText(self, "Nouveau profil", "Nom du profil :",
+                                        text=self.cb_prof.currentText())
+        if not ok or not name.strip():
+            return
+        st = self.ctrl.snapshot()
+        prof = {k: st.p[k] for k in PROFILE_KEYS if k in st.p and k not in st.unsupported}
+        if QMessageBox.question(self, "Nouveau profil", "Inclure la fréquence et le mode actuels ?\n\n"
+                                "Non : le profil ne changera que les réglages (puissance, filtres…).") \
+                == QMessageBox.Yes:
+            prof["freq"], prof["mode"] = st.freq, st.mode
+        self.profiles[name.strip()] = prof
+        self.refresh_profiles(name.strip())
+
+    def delete_profile(self):
+        name = self.cb_prof.currentText()
+        if name and QMessageBox.question(self, "Supprimer", f"Supprimer le profil « {name} » ?") == QMessageBox.Yes:
+            self.profiles.pop(name, None)
+            self.refresh_profiles()
+
+    # --- puissance par bande et sécurité TX ---------------------------------------------------
+    def _track_band_power(self, st):
+        band = self.band_of(st.freq)
+        pwr = st.p.get("pwr")
+        if band and band != self._cur_band:
+            if self._cur_band and self._last_pwr:
+                self.pwr_band[self._cur_band] = self._last_pwr
+            self._cur_band = band
+            if self.ck_pwrband.isChecked() and band in self.pwr_band and self.pwr_band[band] != pwr:
+                target = self.pwr_band[band]
+                QTimer.singleShot(0, lambda: self.ctrl.set_param("pwr", target))
+                self.statusBar().showMessage(f"Bande {band} : puissance remise à {target} W")
+                self._last_pwr = target
+                return
+        if band and pwr:
+            self._last_pwr = pwr
+            self.pwr_band[band] = pwr
+
+    def check_tx_timeout(self):
+        st = self._last
+        if not (self.ctrl.connected and st and st.ptt):
+            self._tx_since = None
+            return
+        now = time.monotonic()
+        if self._tx_since is None:
+            self._tx_since = now
+        elif self.sp_tot.value() and now - self._tx_since > self.sp_tot.value() * 60:
+            self.ctrl.set_ptt(False)
+            self._tx_since = None
+            QApplication.beep()
+            self.statusBar().showMessage(f"Sécurité : émission coupée après {self.sp_tot.value()} min")
+
+    # --- chute d'eau : clic pour s'accorder ------------------------------------------------------
+    def on_wf_click(self, audio_hz):
+        st = self._last
+        if not (st and self.ctrl.connected) or self.wf.marker is None:
+            return
+        sign = -1 if st.mode in ("LSB", "PKTLSB", "RTTY") else 1
+        rf = st.freq + sign * audio_hz
+        new = int(round((rf - sign * self.wf.marker) / 10) * 10)
+        self.ctrl.set_freq(new)
+
+    # --- marche / arrêt du poste -------------------------------------------------------------------
+    def power_on_connect(self):
+        if self.ctrl.connected:
+            self.statusBar().showMessage("Le poste est déjà connecté et allumé")
+            return
+        keep = self.ck_on.isChecked()
+        self.ck_on.setChecked(True)
+        self.toggle_connection()
+        self.ck_on.setChecked(keep)
+
+    def power_off_disconnect(self):
+        if self.ctrl.connected and QMessageBox.question(self, "Éteindre", "Éteindre le FT-991A ?") == QMessageBox.Yes:
+            self.ctrl.disconnect_rig(power_off=True)
+
+    # --- sauvegarde des menus -------------------------------------------------------------------------
+    def open_backup_dir(self):
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        QDesktopServices.openUrl(QUrl.fromLocalFile(backup_dir()))
+
+    def backup_menus(self):
+        if not self.ctrl.connected:
+            QMessageBox.information(self, "Sauvegarde", "Connectez d'abord le poste.")
+            return
+        self.ctrl.job("read_menus")
+
+    def restore_menus(self):
+        if not self.ctrl.connected:
+            QMessageBox.information(self, "Restauration", "Connectez d'abord le poste.")
+            return
+        path, _ = QFileDialog.getOpenFileName(self, "Restaurer une sauvegarde", backup_dir(), "Sauvegarde (*.json)")
         if not path:
             return
-        with open(path, "w", newline="", encoding="utf-8-sig") as f:
-            w = csv.writer(f, delimiter=";")
-            w.writerow(["Canal", "Nom", "Fréquence (Hz)", "Mode", "Relais", "Tonalité"])
-            for m in self.memories:
-                w.writerow([m["ch"], m.get("tag", ""), m["freq"], m.get("mode_label") or m.get("mode", ""),
-                            m.get("shift", ""), m.get("ctcss", "")])
-        self.statusBar().showMessage(f"Mémoires exportées dans {path}")
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            menus = {int(k): str(v) for k, v in data["menus"].items()}
+        except Exception as e:
+            QMessageBox.warning(self, "Fichier illisible", f"Ce fichier n'est pas une sauvegarde CAT Pilot.\n\n{e}")
+            return
+        mems = data.get("memoires", [])
+        txt = (f"Sauvegarde du {data.get('date', '?')} : {len(menus)} menus"
+               + (f" et {len(mems)} mémoires." if mems else ".")
+               + "\n\nSeuls les menus différents seront réécrits. Les menus CAT (031 à 033) "
+                 "ne sont jamais modifiés, pour ne pas couper la liaison.\n\nRestaurer les menus ?")
+        if QMessageBox.question(self, "Restaurer les menus", txt) != QMessageBox.Yes:
+            return
+        self._restore_mems = mems if mems and QMessageBox.question(
+            self, "Mémoires", f"Restaurer aussi les {len(mems)} mémoires de la sauvegarde ?") == QMessageBox.Yes else []
+        self.ctrl.job("write_menus", menus)
+
+    def on_job(self, name, res):
+        if isinstance(res, Exception):
+            if name in ("read_menus", "write_menus", "power_on"):
+                QMessageBox.warning(self, "Erreur", f"{name} : {res}")
+            return
+        if name == "read_menus":
+            if not res:
+                QMessageBox.warning(self, "Sauvegarde", "Le poste n'a renvoyé aucun menu.")
+                return
+            stamp = datetime.datetime.now()
+            default = os.path.join(backup_dir(), f"sauvegarde_FT991A_{stamp:%Y-%m-%d_%H%M}.json")
+            path, _ = QFileDialog.getSaveFileName(self, "Enregistrer la sauvegarde", default, "Sauvegarde (*.json)")
+            if not path:
+                return
+            data = {"poste": "Yaesu FT-991A", "logiciel": f"CAT Pilot {__version__}",
+                    "date": f"{stamp:%d/%m/%Y %H:%M}",
+                    "menus": {f"{n:03d}": v for n, v in sorted(res.items())},
+                    "memoires": [{k: v for k, v in m.items()} for m in self.mem.read_copy]}
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=1)
+            extra = (f" et {len(self.mem.read_copy)} mémoires" if self.mem.read_copy
+                     else " (mémoires non incluses : lisez-les d'abord pour les ajouter)")
+            QMessageBox.information(self, "Sauvegarde terminée", f"{len(res)} menus{extra} enregistrés dans\n{path}")
+        elif name == "write_menus":
+            msg = (f"Menus modifiés : {len(res['changed'])}\nDéjà identiques : {res['same']}\n"
+                   f"Non modifiables ou en échec : {len(res['failed'])}")
+            if res["failed"]:
+                msg += " (" + ", ".join(f"{n:03d}" for n in res["failed"][:20]) + ")"
+            QMessageBox.information(self, "Restauration des menus", msg)
+            mems = getattr(self, "_restore_mems", [])
+            if mems:
+                template = (self.mem.read_copy or mems)[0].get("raw", "")
+                self.ctrl.job("write_memories", mems, template)
+                self._restore_mems = []
 
     # --- serveur -----------------------------------------------------------------------
     def toggle_server(self, on):
@@ -930,6 +1160,8 @@ class MainWindow(QMainWindow):
         if not self.ctrl.connected:
             return
         self._last = st
+        self._state_time = time.monotonic()
+        self._track_band_power(st)
         self._updating = True
         try:
             self._show_state(st)
@@ -971,6 +1203,12 @@ class MainWindow(QMainWindow):
             self.b_pre.setText(PRE_LABELS[p["pre"]] if p["pre"] in (0, 1, 2) else "IPO")
             self.b_pre.setEnabled("pre" not in unsup)
 
+        if st.mode in ("CW", "CWR"):
+            self.wf.marker = 300 + 10 * p.get("pitch", 40)
+        elif st.mode in ("USB", "LSB", "PKTUSB", "PKTLSB", "RTTY", "RTTYR"):
+            self.wf.marker = 1500
+        else:
+            self.wf.marker = None
         s_width = self.sliders["width"][0]
         s_width.setMaximum(17 if st.mode in CW_LIKE else 21)
         self.sliders["width"][1].setText(self.width_text(s_width.value()))
@@ -980,7 +1218,7 @@ class MainWindow(QMainWindow):
             vm = info.get("vm")
             if vm in (1, 2):
                 tag = p.get("mem_tag") or next(
-                    (m.get("tag", "") for m in self.memories if m["ch"] == info["ch"]), "")
+                    (m.get("tag", "") for m in self.mem.memories if m["ch"] == info["ch"]), "")
                 self.lb_mem.setText(f"Mémoire {info['ch']:03d}   {tag}".rstrip())
             else:
                 self.lb_mem.setText("QMB" if vm == 3 else "VFO")

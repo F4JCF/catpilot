@@ -72,6 +72,7 @@ class Waterfall(QWidget):
     COLS, ROWS = 640, 150
     FMAX = 3200                      # Hz affichés
     hover = Signal(object)           # fréquence audio sous la souris (ou None)
+    clicked = Signal(int)            # fréquence audio cliquée
 
     def __init__(self):
         super().__init__()
@@ -90,6 +91,7 @@ class Waterfall(QWidget):
         self.offset = 5.0             # dB au-dessus du bruit de fond
         self.floor = None
         self.message = "Chute d'eau arrêtée"
+        self.marker = None            # fréquence audio où un clic amène le signal
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
         self.timer.start(60)
@@ -179,12 +181,20 @@ class Waterfall(QWidget):
             p.setPen(QPen(QColor(255, 255, 255, 160), 1))
             p.drawLine(int(x), 0, int(x), 5)
             p.drawText(QRectF(x - 20, 5, 40, 12), Qt.AlignCenter, f"{f}")
+        if self.marker:
+            x = r.width() * self.marker / self.FMAX
+            p.setPen(QPen(QColor(255, 255, 255, 110), 1, Qt.DashLine))
+            p.drawLine(int(x), 18, int(x), int(r.height()))
         if self.message:
             p.setPen(QColor("#9a9a9a"))
             p.drawText(r, Qt.AlignCenter, self.message)
 
     def mouseMoveEvent(self, e):
         self.hover.emit(round(e.position().x() / max(1, self.width()) * self.FMAX))
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self.clicked.emit(round(e.position().x() / max(1, self.width()) * self.FMAX))
 
     def leaveEvent(self, _e):
         self.hover.emit(None)

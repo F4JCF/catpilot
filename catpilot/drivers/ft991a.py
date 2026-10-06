@@ -54,6 +54,7 @@ PARAMS = {
     "keyer":     P("KR;", 2, "bool", "KR{:d};"),
     "bkin":      P("BI;", 2, "bool", "BI{:d};"),
     "wpm":       P("KS;", 2, "int", "KS{:03d};"),       # 4-60 mots/min
+    "pitch":     P("KP;", 2, "int", "KP{:02d};"),       # note CW : 300 + 10 x valeur (Hz)
     "split":     P("ST;", 2, "bool", "ST{:d};"),
     "vfob":      P("FB;", 2, "int", "FB{:09d};"),
     "rpt_shift": P("OS0;", 3, "int", "OS0{:d};"),       # 0 simplex, 1 +, 2 -
@@ -67,12 +68,15 @@ RETRY_AFTER = 8.0      # s avant de réessayer un réglage refusé par le poste
 ACTIONS = {
     "swap": "SV;", "a_to_b": "AB;", "b_to_a": "BA;", "vm": "VM;",
     "up": "UP;", "down": "DN;", "zin": "ZI;", "clar_clear": "RC;", "tune": "AC002;",
+    "qmb_store": "QI;", "qmb_recall": "QR;",
 }
+# Menus jamais réécrits lors d'une restauration : les changer couperait la liaison CAT.
+MENU_SKIP = {31, 32, 33}        # CAT RATE, CAT TOT, CAT RTS
 
 
 def parse_mem(s):
     """Décode le corps d'une réponse IF / MR / MT (sans les 2 lettres de tête)."""
-    m = {"ch": int(s[0:3]), "freq": int(s[3:12])}
+    m = {"ch": int(s[0:3]), "freq": int(s[3:12]), "raw": s}
     try:
         m["clar"] = int(s[12:17])
         m["rx_clar"] = s[17] == "1"
@@ -219,9 +223,11 @@ class FT991A(RigDriver):
                 self._tags[ch] = ""
         return self._tags[ch]
 
-    def read_memories(self):
+    def read_memories(self, progress=None):
         out = []
         for ch in range(1, 118):
+            if progress and ch % 10 == 0:
+                progress(f"Lecture des mémoires… {ch}/117")
             try:
                 r = self._query(f"{self._mem_cmd}{ch:03d};")
             except RigRefused:
@@ -243,6 +249,72 @@ class FT991A(RigDriver):
             except (IndexError, ValueError):
                 pass
         return out
+
+    @staticmethod
+    def build_mem(m, template):
+        """Corps MT complet : on part d'un canal lu sur le poste et on remplace les champs."""
+        t = list(template.ljust(38))
+        t[3:12] = f"{int(m['freq']):09d}"
+        t[12:17] = f"{int(m.get('clar', 0)):+05d}"
+        t[17] = "1" if m.get("rx_clar") else "0"
+        t[18] = "1" if m.get("tx_clar") else "0"
+        t[19] = m["code"]
+        t[21] = str(int(m.get("ctcss", 0)))
+        t[24] = str(int(m.get("shift", 0)))
+        t[26:38] = f"{m.get('tag', '')[:12]:<12}"
+        t[0:3] = f"{int(m['ch']):03d}"
+        return "".join(t[:38])
+
+    def write_memories(self, mems, template, progress=None):
+        """Écrit les canaux puis les relit pour vérifier. Renvoie [(canal, réussi)]."""
+        out = []
+        for i, m in enumerate(mems, 1):
+            if progress:
+                progress(f"Écriture des mémoires… {i}/{len(mems)}")
+            body = self.build_mem(m, m.get("raw") or template)
+            ok = False
+            try:
+                self._write(f"MT{body};")
+                time.sleep(0.15)
+                back = parse_mem(self._query(f"MT{int(m['ch']):03d};")[2:])
+                ok = back["freq"] == int(m["freq"]) and back.get("tag", "") == m.get("tag", "")[:12].strip()
+                self._tags[int(m["ch"])] = back.get("tag", "")
+            except (RigError, ValueError, IndexError):
+                pass
+            out.append((int(m["ch"]), ok))
+        return out
+
+    def read_menus(self, progress=None):
+        menus = {}
+        for n in range(1, 161):
+            if progress and n % 10 == 0:
+                progress(f"Lecture des menus du poste… {n}")
+            try:
+                menus[n] = self._query(f"EX{n:03d};")[5:]
+            except RigError:
+                pass
+        return menus
+
+    def write_menus(self, menus, progress=None):
+        res = {"changed": [], "same": 0, "failed": [], "skipped": sorted(MENU_SKIP & set(menus))}
+        for i, (n, value) in enumerate(sorted(menus.items()), 1):
+            if n in MENU_SKIP:
+                continue
+            if progress and i % 10 == 0:
+                progress(f"Restauration des menus… {i}/{len(menus)}")
+            try:
+                if self._query(f"EX{n:03d};")[5:] == value:
+                    res["same"] += 1
+                    continue
+                self._write(f"EX{n:03d}{value};")
+                time.sleep(0.08)
+                if self._query(f"EX{n:03d};")[5:] == value:
+                    res["changed"].append(n)
+                else:
+                    res["failed"].append(n)
+            except RigError:
+                res["failed"].append(n)
+        return res
 
     # --- commandes ---------------------------------------------------------
     def set_freq(self, hz):

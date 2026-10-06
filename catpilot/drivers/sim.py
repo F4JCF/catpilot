@@ -11,7 +11,7 @@ DEFAULTS = {
     "shift": 0, "contour": False, "contour_f": 1000, "apf": False, "notch": False,
     "notch_f": 100, "att": False, "pre": 1, "agc": 4, "atu": 0, "keyer": True,
     "bkin": False, "wpm": 20, "split": False, "vfob": 7074000, "rpt_shift": 0,
-    "tone_mode": 0, "tone": 12,
+    "tone_mode": 0, "tone": 12, "pitch": 40,
 }
 SAMPLE_MEMORIES = [
     (1, 145500000, "FM", "APPEL"), (2, 145600000, "FM", "R0", 2, 2),
@@ -32,6 +32,14 @@ class SimDriver(RigDriver):
         self.info = {"ch": 1, "freq": 0, "clar": 0, "rx_clar": False, "tx_clar": False,
                      "mode": "USB", "vm": 0, "ctcss": 0, "shift": 0}
         self._s = 0.4
+        self.mems = {}
+        for ch, f, mode, tag, *rest in SAMPLE_MEMORIES:
+            ctcss, shift = (rest + [0, 0])[:2]
+            self.mems[ch] = {"ch": ch, "freq": f, "mode": mode, "tag": tag, "clar": 0,
+                             "rx_clar": False, "tx_clar": False, "ctcss": ctcss, "shift": shift,
+                             "raw": f"{ch:03d}{f:09d}+0000000000000000          "}
+        self.menus = {n: f"{n % 7}" for n in range(1, 154)}
+        self.menus[31] = "3"
 
     def open(self):
         pass
@@ -54,16 +62,32 @@ class SimDriver(RigDriver):
             st.po = st.swr = st.alc = st.swr_val = 0.0
         st.p.update(self.p)
         st.p["info"] = dict(self.info)
-        st.p["mem_tag"] = next((m[3] for m in SAMPLE_MEMORIES if m[0] == self.info["ch"]), "")
+        st.p["mem_tag"] = self.mems.get(self.info["ch"], {}).get("tag", "")
 
-    def read_memories(self):
+    def read_memories(self, progress=None):
         time.sleep(0.5)
-        out = []
-        for ch, f, mode, tag, *rest in SAMPLE_MEMORIES:
-            ctcss, shift = (rest + [0, 0])[:2]
-            out.append({"ch": ch, "freq": f, "mode": mode, "tag": tag, "clar": 0,
-                        "rx_clar": False, "tx_clar": False, "ctcss": ctcss, "shift": shift})
-        return out
+        return [dict(m) for _ch, m in sorted(self.mems.items())]
+
+    def write_memories(self, mems, template, progress=None):
+        from .ft991a import CODE_TO_MODE
+        for m in mems:
+            m = dict(m)
+            m["mode"] = CODE_TO_MODE.get(m.get("code"), "FM")
+            m["mode_label"] = {"B": "FM-N", "D": "AM-N"}.get(m.get("code"))
+            self.mems[int(m["ch"])] = m
+        time.sleep(0.3)
+        return [(int(m["ch"]), True) for m in mems]
+
+    def read_menus(self, progress=None):
+        time.sleep(0.5)
+        return dict(self.menus)
+
+    def write_menus(self, menus, progress=None):
+        changed = [n for n, v in menus.items() if n not in (31, 32, 33) and self.menus.get(n) != v]
+        for n in changed:
+            self.menus[n] = menus[n]
+        return {"changed": changed, "same": len(menus) - len(changed), "failed": [],
+                "skipped": [n for n in (31, 32, 33) if n in menus]}
 
     def set_freq(self, hz):
         self.f = int(hz)
@@ -89,9 +113,9 @@ class SimDriver(RigDriver):
             i["vm"] = 0 if i["vm"] else 1
         elif name == "mem_recall":
             i["vm"], i["ch"] = 1, int(args[0])
-            for ch, f, mode, *_r in SAMPLE_MEMORIES:
-                if ch == i["ch"]:
-                    self.f, self.m = f, mode
+            m = self.mems.get(i["ch"])
+            if m:
+                self.f, self.m = m["freq"], m["mode"]
         elif name == "clar_step":
             i["clar"] = max(-9999, min(9999, i["clar"] + int(args[0])))
         elif name == "clar_clear":

@@ -24,8 +24,8 @@ METERS = ("smeter", "s_text", "s_db", "po", "swr", "swr_val", "alc")
 class RigController(QObject):
     state_changed = Signal(object)      # RigState
     status_changed = Signal(bool, str)  # connecté ?, message
-    memories_loaded = Signal(list)
     message = Signal(str)
+    job_done = Signal(str, object)      # nom de la tâche longue, résultat (ou exception)
 
     def __init__(self):
         super().__init__()
@@ -112,8 +112,9 @@ class RigController(QObject):
         if self.connected:
             self._actions.put((name, args))
 
-    def read_memories(self):
-        self.action("__read_memories")
+    def job(self, name, *args):
+        """Tâche longue exécutée par le pilote (lecture/écriture de mémoires, menus…)."""
+        self.action("__job", name, args)
 
     def snapshot(self):
         with self.lock:
@@ -139,9 +140,13 @@ class RigController(QObject):
                 name, args = self._actions.get_nowait()
             except queue.Empty:
                 return
-            if name == "__read_memories":
-                self.message.emit("Lecture des mémoires du poste…")
-                self.memories_loaded.emit(self.driver.read_memories())
+            if name == "__job":
+                job, jargs = args
+                try:
+                    res = getattr(self.driver, job)(*jargs, progress=self.message.emit)
+                except Exception as e:      # le résultat d'une tâche ne doit jamais tuer la boucle
+                    res = e
+                self.job_done.emit(job, res)
             else:
                 self.driver.action(name, *args)
 

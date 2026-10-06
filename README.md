@@ -1,4 +1,4 @@
-# CAT Pilot 0.4 — Yaesu FT-991A
+# CAT Pilot 0.5 — Yaesu FT-991A
 
 Logiciel de pilotage CAT du Yaesu FT-991A sous Windows, avec partage du CAT
 vers WSJT-X, JTDX, Log4OM, N1MM… grâce à un serveur compatible rigctld.
@@ -42,9 +42,43 @@ Le poste « Simulateur » permet de tout essayer sans radio.
   NAR, NB, DNF, APF.
 - **Clarifier et relais FM** : RX/TX clarifier, pas de ±10/±100 Hz, CLR,
   décalage relais, mode de tonalité, fréquence CTCSS.
-- **Mémoires** (bouton « Mémoires ») : lecture des 117 canaux avec leurs noms,
-  rappel par double-clic, export CSV. En mode mémoire, le nom du canal
-  s'affiche à côté de son numéro.
+- **QMB** : mémoires rapides (STO / RCL) dans le cadre VFO.
+
+### Trafic au quotidien
+- **Profils** (barre du haut) : « FT8 20 m », « BLU 40 m »… règlent d'un clic
+  fréquence, mode, puissance et filtres. « Enregistrer… » crée un profil à
+  partir des réglages actuels.
+- **Puissance mémorisée par bande** : chaque bande retrouve sa dernière puissance.
+- **Sécurité TX** : coupure de l'émission au-delà d'une durée réglable, quel que
+  soit le logiciel qui émet (3 min par défaut, 0 = désactivée).
+- **Clic sur la chute d'eau** : en BLU, DATA ou CW, le poste s'accorde sur le
+  signal cliqué ; la ligne pointillée montre où il sera placé (1500 Hz, ou la
+  note CW du poste).
+- **Raccourcis** (menu Aide) : F12 = MOX, Ctrl+↑/↓ = accord, Page préc./suiv. =
+  bande, Ctrl+M = mémoires, Ctrl+W = chute d'eau, Échap = arrêt du scan. Un
+  bouton d'accord USB se programme pour envoyer Ctrl+↑ / Ctrl+↓.
+
+### Mémoires et scan (bouton « Mémoires »)
+- Lecture des 117 canaux avec leurs noms ; en mode mémoire, le nom s'affiche à
+  côté du numéro. Double-clic sur le numéro : rappel.
+- **Édition** : double-clic sur le nom, la fréquence, le mode, le relais ou la
+  tonalité. Les lignes modifiées passent en jaune. « Ajouter un canal » crée un
+  canal libre avec la fréquence actuelle.
+- **Import / export CSV** (séparateur « ; »), colonnes : Canal, Nom, Fréquence
+  (MHz), Mode, Relais (+, −), Tonalité (TSQ, Tone, DCS).
+- **Écrire dans le poste** : envoie les lignes en jaune, puis les relit pour
+  vérifier. Les mémoires du poste sont d'abord sauvegardées automatiquement dans
+  Documents\CATPilot\sauvegardes. La fréquence de la tonalité CTCSS n'est pas
+  transmise par cette commande : à régler sur le poste si besoin.
+- **Scan** des mémoires du tableau ou d'une plage de fréquences, arrêt sur
+  signal au-dessus du seuil choisi, écoute de quelques secondes puis reprise
+  (0 s = arrêt définitif sur le signal).
+
+### Sauvegarde du poste (menu « Poste »)
+- **Sauvegarder les menus du poste** : tous les réglages du menu, plus les
+  mémoires si elles ont été lues, dans un fichier .json.
+- **Restaurer les menus du poste** : seuls les réglages différents sont
+  réécrits puis vérifiés. Les menus CAT 031 à 033 ne sont jamais modifiés.
 
 **Marche / arrêt** (cases sous la barre de liaison, cochées par défaut) :
 - se connecter automatiquement au lancement du logiciel (avec le dernier port utilisé) ;
@@ -72,11 +106,10 @@ PTT par sécurité. Même chose à la fermeture de CAT Pilot.
 
 ## À valider sur le poste
 
-Cette version n'a été testée que contre un FT-991A simulé. Points à vérifier
-lors du premier essai : la commande Split, les largeurs de filtre affichées
-(indicatives), le notch manuel et le contour, le coupleur.
+Points à vérifier au premier essai : l'écriture d'une mémoire (essayer d'abord
+sur un canal libre), la restauration des menus, les QMB.
 
 ## Pas encore inclus
 
-Écriture des mémoires, mémoires rapides (QMB), messages CW, égaliseur micro,
+Messages CW, égaliseur micro, DX cluster, carnet de trafic,
 panoramique large de toute la bande (il faudrait un SDR branché sur le poste).
