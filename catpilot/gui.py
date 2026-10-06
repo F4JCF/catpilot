@@ -19,6 +19,7 @@ from .controller import RigController
 from .drivers import DRIVERS
 from .drivers.sim import SimDriver
 from .rigctl_server import RigctlServer
+from .waterfall import Waterfall, guess_radio_input, list_inputs
 
 # --- données ----------------------------------------------------------------
 MODE_BUTTONS = [("USB", "USB"), ("LSB", "LSB"), ("CW", "CW"), ("CWR", "CW-R"),
@@ -346,7 +347,7 @@ class MainWindow(QMainWindow):
         h = QHBoxLayout()
         self.lb_mem = QLabel("VFO")
         self.lb_mem.setObjectName("info")
-        self.lb_mem.setMinimumWidth(110)
+        self.lb_mem.setMinimumWidth(260)
         self.lb_vfob_t = QLabel("VFO B")
         self.lb_vfob_t.setObjectName("info")
         self.vfob = FreqDisplay("vfob")
@@ -405,6 +406,40 @@ class MainWindow(QMainWindow):
         self.lb_meter.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         ah.addWidget(self.lb_meter)
         ml.addLayout(ah)
+        self.wf = Waterfall()
+        self.wf.hover.connect(self.on_wf_hover)
+        ml.addWidget(self.wf, 1)
+        wh = QHBoxLayout()
+        self.cb_audio = QComboBox()
+        self.cb_audio.setMinimumWidth(150)
+        self.cb_audio.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.b_wf = QPushButton("Chute d'eau")
+        self.b_wf.setCheckable(True)
+        self.b_wf.toggled.connect(self.toggle_waterfall)
+        self.sl_contrast = QSlider(Qt.Horizontal)
+        self.sl_contrast.setRange(15, 80)
+        self.sl_contrast.setValue(45)
+        self.sl_contrast.setMaximumWidth(90)
+        self.sl_contrast.setToolTip("Contraste de la chute d'eau")
+        self.sl_contrast.valueChanged.connect(lambda v: setattr(self.wf, "contrast", float(v)))
+        self.sl_level = QSlider(Qt.Horizontal)
+        self.sl_level.setRange(-15, 30)
+        self.sl_level.setValue(5)
+        self.sl_level.setMaximumWidth(90)
+        self.sl_level.setToolTip("Seuil : plus à droite, moins de bruit de fond visible")
+        self.sl_level.valueChanged.connect(lambda v: setattr(self.wf, "offset", float(v)))
+        self.lb_wf = QLabel("")
+        self.lb_wf.setObjectName("value")
+        self.lb_wf.setMinimumWidth(150)
+        wh.addWidget(self.cb_audio, 1)
+        wh.addWidget(self.b_wf)
+        wh.addWidget(QLabel("Contraste"))
+        wh.addWidget(self.sl_contrast)
+        wh.addWidget(QLabel("Seuil"))
+        wh.addWidget(self.sl_level)
+        wh.addWidget(self.lb_wf)
+        ml.addLayout(wh)
+        self.refresh_audio()
         g.addWidget(pm, 0, 3)
 
         # Modes
@@ -507,7 +542,9 @@ class MainWindow(QMainWindow):
 
         # Liaison et partage
         pl = Panel("Liaison et partage du CAT")
-        ll = QHBoxLayout(pl.body)
+        lv = QVBoxLayout(pl.body)
+        lv.setContentsMargins(0, 0, 0, 0)
+        ll = QHBoxLayout()
         self.cb_rig = QComboBox()
         self.cb_rig.addItems(DRIVERS.keys())
         self.cb_rig.currentTextChanged.connect(self.on_rig_changed)
@@ -541,10 +578,21 @@ class MainWindow(QMainWindow):
         self.b_mems = QPushButton("Mémoires")
         self.b_mems.setCheckable(True)
         ll.addWidget(self.b_mems)
+        lv.addLayout(ll)
+        lo = QHBoxLayout()
+        self.ck_auto = QCheckBox("Se connecter au lancement du logiciel")
+        self.ck_on = QCheckBox("Allumer le poste à la connexion")
+        self.ck_off = QCheckBox("Éteindre le poste à la fermeture du logiciel")
+        self.ck_on.setToolTip("Le poste doit rester alimenté en 13,8 V et relié en USB")
+        for w in (self.ck_auto, self.ck_on, self.ck_off):
+            lo.addWidget(w)
+            lo.addSpacing(16)
+        lo.addStretch()
+        lv.addLayout(lo)
         pl.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         g.addWidget(pl, 3, 0, 1, 4)
-        for r in range(3):
-            g.setRowStretch(r, 1)
+        for r, k in ((0, 3), (1, 2), (2, 2)):   # la ligne du haut (chute d'eau) prend plus de place
+            g.setRowStretch(r, k)
         g.setRowStretch(3, 0)
 
         g.setColumnStretch(2, 1)
@@ -601,6 +649,14 @@ class MainWindow(QMainWindow):
             self.restoreGeometry(s.value("geometry"))
         if s.value("server", "false") == "true":
             self.ck_srv.setChecked(True)
+        self.refresh_audio(s.value("audio", ""))
+        self.ck_auto.setChecked(s.value("auto_connect", "true") == "true")
+        self.ck_on.setChecked(s.value("power_on", "true") == "true")
+        self.ck_off.setChecked(s.value("power_off", "true") == "true")
+        if self.ck_auto.isChecked():
+            QTimer.singleShot(400, self.auto_connect)
+        self.sl_contrast.setValue(int(s.value("wf_contrast", 45)))
+        self.sl_level.setValue(int(s.value("wf_level", 5)))
 
     def closeEvent(self, e):
         s = self.settings
@@ -612,7 +668,17 @@ class MainWindow(QMainWindow):
         s.setValue("server", "true" if self.ck_srv.isChecked() else "false")
         s.setValue("band_mem", json.dumps(self.band_mem))
         s.setValue("geometry", self.saveGeometry())
-        self.ctrl.disconnect_rig()
+        s.setValue("audio", self.cb_audio.currentText())
+        s.setValue("auto_connect", "true" if self.ck_auto.isChecked() else "false")
+        s.setValue("power_on", "true" if self.ck_on.isChecked() else "false")
+        s.setValue("power_off", "true" if self.ck_off.isChecked() else "false")
+        s.setValue("wf_contrast", self.sl_contrast.value())
+        s.setValue("wf_level", self.sl_level.value())
+        self.wf.stop()
+        if self.ctrl.connected and self.ck_off.isChecked():
+            self.statusBar().showMessage("Extinction du poste…")
+            QApplication.processEvents()
+        self.ctrl.disconnect_rig(power_off=self.ck_off.isChecked())
         if self.server:
             self.server.stop()
         super().closeEvent(e)
@@ -642,6 +708,14 @@ class MainWindow(QMainWindow):
         for w in (self.cb_port, self.cb_baud, self.cb_stop):
             w.setEnabled(cls is not SimDriver)
 
+    def auto_connect(self):
+        """Connexion automatique au lancement, si un port a déjà été utilisé."""
+        if self.ctrl.connected:
+            return
+        cls = DRIVERS[self.cb_rig.currentText()]
+        if cls is SimDriver or self.cb_port.findData(self.settings.value("port", "")) >= 0:
+            self.toggle_connection()
+
     def toggle_connection(self):
         if self.ctrl.connected:
             self.ctrl.disconnect_rig()
@@ -654,7 +728,8 @@ class MainWindow(QMainWindow):
             return
         try:
             self.ctrl.connect_rig(cls(port, int(self.cb_baud.currentText()),
-                                      int(self.cb_stop.currentText())))
+                                      int(self.cb_stop.currentText())),
+                                  power_on=self.ck_on.isChecked())
         except Exception as e:
             QMessageBox.critical(self, "Connexion impossible",
                                  f"Le port {port} n'a pas pu être ouvert.\n\n{e}\n\n"
@@ -744,6 +819,42 @@ class MainWindow(QMainWindow):
             return f"{table[v]} Hz"
         return f"pos. {v}"
 
+    # --- chute d'eau ---------------------------------------------------------------
+    def refresh_audio(self, wanted=None):
+        self.cb_audio.clear()
+        inputs = list_inputs()
+        for dev, label in inputs:
+            self.cb_audio.addItem(label, dev)
+        i = self.cb_audio.findText(wanted) if wanted else -1
+        if i < 0:
+            i = self.cb_audio.findData(guess_radio_input(inputs))
+        if i >= 0:
+            self.cb_audio.setCurrentIndex(i)
+
+    def toggle_waterfall(self, on):
+        if on:
+            try:
+                self.wf.start(self.cb_audio.currentData())
+            except Exception as e:
+                QMessageBox.warning(self, "Chute d'eau", f"L'entrée audio n'a pas pu être ouverte.\n\n{e}")
+                self.b_wf.blockSignals(True)
+                self.b_wf.setChecked(False)
+                self.b_wf.blockSignals(False)
+                return
+        else:
+            self.wf.stop()
+        self.cb_audio.setEnabled(not on)
+
+    def on_wf_hover(self, audio_hz):
+        if audio_hz is None or not self._last:
+            self.lb_wf.setText("")
+            return
+        st = self._last
+        sign = -1 if st.mode in ("LSB", "PKTLSB", "RTTY") else 1
+        rf = st.freq + sign * audio_hz
+        mhz, rest = divmod(rf, 1_000_000)
+        self.lb_wf.setText(f"{audio_hz} Hz → {mhz}.{rest // 1000:03d}.{rest % 1000:03d}")
+
     # --- mémoires ----------------------------------------------------------------------
     def on_memories(self, mems):
         self.memories = mems
@@ -752,7 +863,8 @@ class MainWindow(QMainWindow):
             shift = ["", "+", "−"][m.get("shift", 0)] if m.get("shift", 0) in (0, 1, 2) else ""
             tone = ["", "TSQ", "Tone", "DCS"][m.get("ctcss", 0)] if m.get("ctcss", 0) in range(4) else ""
             cells = [f"{m['ch']:03d}", m.get("tag", ""), self._fmt_f(m["freq"]),
-                     MODE_LABELS.get(m.get("mode"), m.get("mode", "")), shift, tone]
+                     m.get("mode_label") or MODE_LABELS.get(m.get("mode"), m.get("mode", "")),
+                     shift, tone]
             for c, txt in enumerate(cells):
                 it = QTableWidgetItem(txt)
                 it.setTextAlignment(Qt.AlignCenter if c != 1 else Qt.AlignLeft | Qt.AlignVCenter)
@@ -782,7 +894,7 @@ class MainWindow(QMainWindow):
             w = csv.writer(f, delimiter=";")
             w.writerow(["Canal", "Nom", "Fréquence (Hz)", "Mode", "Relais", "Tonalité"])
             for m in self.memories:
-                w.writerow([m["ch"], m.get("tag", ""), m["freq"], m.get("mode", ""),
+                w.writerow([m["ch"], m.get("tag", ""), m["freq"], m.get("mode_label") or m.get("mode", ""),
                             m.get("shift", ""), m.get("ctcss", "")])
         self.statusBar().showMessage(f"Mémoires exportées dans {path}")
 
@@ -865,7 +977,13 @@ class MainWindow(QMainWindow):
 
         info = p.get("info", {})
         if info:
-            self.lb_mem.setText(f"Mémoire {info['ch']:03d}" if info.get("vm") else "VFO")
+            vm = info.get("vm")
+            if vm in (1, 2):
+                tag = p.get("mem_tag") or next(
+                    (m.get("tag", "") for m in self.memories if m["ch"] == info["ch"]), "")
+                self.lb_mem.setText(f"Mémoire {info['ch']:03d}   {tag}".rstrip())
+            else:
+                self.lb_mem.setText("QMB" if vm == 3 else "VFO")
             self.b_vm.setChecked(bool(info.get("vm")))
             self.b_rxclar.setChecked(bool(info.get("rx_clar")))
             self.b_txclar.setChecked(bool(info.get("tx_clar")))

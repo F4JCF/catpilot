@@ -71,6 +71,13 @@ class RigDriver:
             timeout=0.3, write_timeout=0.5, rtscts=False, dsrdtr=False,
         )
 
+    def power_on(self):
+        """Allume le poste s'il est éteint. Renvoie True s'il a fallu l'allumer."""
+        return False
+
+    def power_off(self):
+        pass
+
     def close(self):
         if self.ser:
             try:

@@ -1,4 +1,4 @@
-# CAT Pilot 0.2 — Yaesu FT-991A
+# CAT Pilot 0.4 — Yaesu FT-991A
 
 Logiciel de pilotage CAT du Yaesu FT-991A sous Windows, avec partage du CAT
 vers WSJT-X, JTDX, Log4OM, N1MM… grâce à un serveur compatible rigctld.
@@ -30,6 +30,11 @@ Le poste « Simulateur » permet de tout essayer sans radio.
 - **Modes** : USB, LSB, CW, CW-R, AM, FM, RTTY, DATA-L/U/FM, C4FM.
 - **RF** : ATT, IPO / AMP 1 / AMP 2, AGC, coupleur (ATU) et Tune.
 - **Mesures** : S-mètre et ROS à aiguille ; en émission, puissance émise et ALC.
+- **Chute d'eau** : analyse de l'audio de réception du codec USB du poste
+  (« USB Audio CODEC », présélectionné), sur environ 3 kHz autour de la
+  fréquence affichée, comme dans WSJT-X. Le survol indique la fréquence réelle.
+  Réglages : contraste et seuil. Le CAT du FT-991A ne transmet pas les données
+  de son propre scope, d'où ce choix.
 - **Réception** : volume, gain HF, squelch.
 - **Émission** : puissance, gain micro, MOX, VOX, processeur.
 - **CW** : keyer, BK-IN, ZIN, vitesse.
@@ -38,7 +43,16 @@ Le poste « Simulateur » permet de tout essayer sans radio.
 - **Clarifier et relais FM** : RX/TX clarifier, pas de ±10/±100 Hz, CLR,
   décalage relais, mode de tonalité, fréquence CTCSS.
 - **Mémoires** (bouton « Mémoires ») : lecture des 117 canaux avec leurs noms,
-  rappel par double-clic, export CSV.
+  rappel par double-clic, export CSV. En mode mémoire, le nom du canal
+  s'affiche à côté de son numéro.
+
+**Marche / arrêt** (cases sous la barre de liaison, cochées par défaut) :
+- se connecter automatiquement au lancement du logiciel (avec le dernier port utilisé) ;
+- allumer le poste à la connexion (commande CAT PS1) ;
+- éteindre le poste à la fermeture du logiciel (commande CAT PS0). Le bouton
+  « Déconnecter » seul n'éteint jamais le poste.
+
+Pour l'allumage, le poste doit rester alimenté en 13,8 V et relié en USB.
 
 Si le poste refuse une commande (« ?; »), le bouton correspondant est grisé
 au lieu de couper la liaison.
@@ -65,4 +79,4 @@ lors du premier essai : la commande Split, les largeurs de filtre affichées
 ## Pas encore inclus
 
 Écriture des mémoires, mémoires rapides (QMB), messages CW, égaliseur micro,
-spectre (le scope du FT-991A n'est pas transmis par le CAT).
+panoramique large de toute la bande (il faudrait un SDR branché sur le poste).

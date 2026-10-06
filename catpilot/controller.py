@@ -38,10 +38,12 @@ class RigController(QObject):
         self._actions = queue.Queue()
         self._thread = None
         self._running = False
+        self._power_on = False
 
     # --- connexion -------------------------------------------------------
-    def connect_rig(self, driver):
+    def connect_rig(self, driver, power_on=False):
         self.disconnect_rig()
+        self._power_on = power_on
         driver.open()
         self.driver = driver
         self.state = RigState()
@@ -53,7 +55,7 @@ class RigController(QObject):
         self._thread.start()
         self.status_changed.emit(True, f"Connecté : {driver.name} sur {driver.port}")
 
-    def disconnect_rig(self):
+    def disconnect_rig(self, power_off=False):
         was = self.connected
         self._running = False
         if self._thread:
@@ -63,6 +65,11 @@ class RigController(QObject):
             if self.state.ptt:           # sécurité : ne jamais laisser le poste en émission
                 try:
                     self.driver.set_ptt(False)
+                except Exception:
+                    pass
+            if power_off and was:
+                try:
+                    self.driver.power_off()
                 except Exception:
                     pass
             self.driver.close()
@@ -156,6 +163,14 @@ class RigController(QObject):
 
     def _run(self):
         errors = 0
+        if self._power_on:
+            self.message.emit("Allumage du poste…")
+            try:
+                done = self.driver.power_on()
+                self.message.emit(("Poste allumé" if done else "Poste déjà allumé")
+                                  + f" : {self.driver.name} sur {self.driver.port}")
+            except Exception as e:
+                self.message.emit(f"Allumage impossible : {e}")
         while self._running:
             try:
                 self._send_pending()

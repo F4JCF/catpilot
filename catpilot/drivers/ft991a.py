@@ -78,10 +78,11 @@ def parse_mem(s):
         m["rx_clar"] = s[17] == "1"
         m["tx_clar"] = s[18] == "1"
         m["mode"] = CODE_TO_MODE.get(s[19], "?")
+        m["mode_label"] = {"B": "FM-N", "D": "AM-N"}.get(s[19])
         m["vm"] = int(s[20])
         m["ctcss"] = int(s[21])
         m["shift"] = int(s[24])
-        m["tag"] = s[25:].strip()
+        m["tag"] = s[26:].strip()        # s[25] est un champ fixe, pas une lettre du nom
     except (IndexError, ValueError):
         pass
     return m
@@ -101,6 +102,7 @@ class FT991A(RigDriver):
         self.unsupported = {}      # réglage -> heure du refus
         self._context = None       # (mode, gamme de fréquence) au dernier cycle
         self._mem_cmd = "MT"
+        self._tags = {}            # canal -> nom de la mémoire
 
     # --- échanges bas niveau ------------------------------------------------
     def _write(self, cmd):
@@ -121,6 +123,34 @@ class FT991A(RigDriver):
     @staticmethod
     def _num(s):
         return int("".join(c for c in s if c.isdigit()) or 0)
+
+    # --- marche / arrêt -------------------------------------------------------
+    def is_on(self):
+        try:
+            self._query("FA;")
+            return True
+        except RigError:
+            return False
+
+    def power_on(self, wait=15.0):
+        if self.is_on():
+            return False
+        # Poste éteint : son processeur CAT dort. Un premier envoi le réveille,
+        # le second, environ une seconde plus tard, déclenche réellement l'allumage.
+        self._write("PS1;")
+        time.sleep(1.0)
+        self._write("PS1;")
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < wait:
+            time.sleep(0.5)
+            if self.is_on():
+                time.sleep(1.0)          # laisser le poste finir son démarrage
+                return True
+        raise RigError("le poste ne s'est pas allumé (alimentation 13,8 V coupée ?)")
+
+    def power_off(self):
+        self._write("PS0;")
+        time.sleep(0.3)
 
     # --- lecture -----------------------------------------------------------
     def poll(self, st):
@@ -165,7 +195,9 @@ class FT991A(RigDriver):
             try:
                 body = self._query(p.query)[p.idx:]
                 if p.kind == "if":
-                    st.p[key] = parse_mem(body)
+                    st.p[key] = info = parse_mem(body)
+                    if info.get("vm") in (1, 2):     # mode mémoire : on cherche son nom
+                        st.p["mem_tag"] = self._tag(info["ch"])
                 elif p.kind == "bool":
                     st.p[key] = int(body) != 0
                 else:
@@ -178,6 +210,14 @@ class FT991A(RigDriver):
                 self._fails[key] = self._fails.get(key, 0) + 1
                 if self._fails[key] >= 2:
                     self.unsupported[key] = time.monotonic()
+
+    def _tag(self, ch):
+        if ch not in self._tags:
+            try:
+                self._tags[ch] = parse_mem(self._query(f"MT{ch:03d};")[2:]).get("tag", "")
+            except (RigError, ValueError, IndexError):
+                self._tags[ch] = ""
+        return self._tags[ch]
 
     def read_memories(self):
         out = []
@@ -199,6 +239,7 @@ class FT991A(RigDriver):
                 m = parse_mem(r[2:])
                 m["ch"] = ch
                 out.append(m)
+                self._tags[ch] = m.get("tag", "")
             except (IndexError, ValueError):
                 pass
         return out

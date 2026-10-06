@@ -54,6 +54,7 @@ class SimDriver(RigDriver):
             st.po = st.swr = st.alc = st.swr_val = 0.0
         st.p.update(self.p)
         st.p["info"] = dict(self.info)
+        st.p["mem_tag"] = next((m[3] for m in SAMPLE_MEMORIES if m[0] == self.info["ch"]), "")
 
     def read_memories(self):
         time.sleep(0.5)
