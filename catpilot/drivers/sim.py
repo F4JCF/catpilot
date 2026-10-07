@@ -11,7 +11,8 @@ DEFAULTS = {
     "shift": 0, "contour": False, "contour_f": 1000, "apf": False, "notch": False,
     "notch_f": 100, "att": False, "pre": 1, "agc": 4, "atu": 0, "keyer": True,
     "bkin": False, "wpm": 20, "split": False, "vfob": 7074000, "rpt_shift": 0,
-    "tone_mode": 0, "tone": 12, "pitch": 40,
+    "tone_mode": 0, "tone": 12, "pitch": 40, "vox_gain": 50, "mic_eq": False, "proc_lvl": 50,
+    "mon": False, "mon_lvl": 30,
 }
 SAMPLE_MEMORIES = [
     (1, 145500000, "FM", "APPEL"), (2, 145600000, "FM", "R0", 2, 2),
@@ -24,6 +25,10 @@ SAMPLE_MEMORIES = [
 class SimDriver(RigDriver):
     name = "Simulateur"
     modes = FT991A.modes
+    max_freq = 470_000_000
+    has_c4fm = True
+    has_usb_audio = True
+    menu_skip = {"031", "032", "033"}
 
     def __init__(self, port="SIM", baud=0, stopbits=1):
         super().__init__(port or "SIM", baud, stopbits)
@@ -38,8 +43,9 @@ class SimDriver(RigDriver):
             self.mems[ch] = {"ch": ch, "freq": f, "mode": mode, "tag": tag, "clar": 0,
                              "rx_clar": False, "tx_clar": False, "ctcss": ctcss, "shift": shift,
                              "raw": f"{ch:03d}{f:09d}+0000000000000000          "}
-        self.menus = {n: f"{n % 7}" for n in range(1, 154)}
-        self.menus[31] = "3"
+        self.menus = {f"{n:03d}": f"{n % 7}" for n in range(1, 154)}
+        self.menus["031"] = "3"
+        self.cw_log = []
 
     def open(self):
         pass
@@ -83,11 +89,26 @@ class SimDriver(RigDriver):
         return dict(self.menus)
 
     def write_menus(self, menus, progress=None):
-        changed = [n for n, v in menus.items() if n not in (31, 32, 33) and self.menus.get(n) != v]
+        changed = [n for n, v in menus.items() if n not in self.menu_skip and self.menus.get(n) != v]
         for n in changed:
             self.menus[n] = menus[n]
         return {"changed": changed, "same": len(menus) - len(changed), "failed": [],
-                "skipped": [n for n in (31, 32, 33) if n in menus]}
+                "skipped": sorted(self.menu_skip & set(menus))}
+
+    def read_menu(self, mid):
+        return self.menus[mid]
+
+    def write_menu(self, mid, value):
+        if mid in self.menu_skip:
+            return False
+        self.menus[mid] = value
+        return True
+
+    def cw_send(self, text, slot=5):
+        self.cw_log.append(text)
+
+    def cw_play(self, slot):
+        self.cw_log.append(f"<mémoire {slot}>")
 
     def set_freq(self, hz):
         self.f = int(hz)
@@ -103,7 +124,11 @@ class SimDriver(RigDriver):
 
     def action(self, name, *args):
         i = self.info
-        if name == "swap":
+        if name == "cw_text":
+            self.cw_send(*args)
+        elif name == "cw_play":
+            self.cw_play(*args)
+        elif name == "swap":
             self.f, self.p["vfob"] = self.p["vfob"], self.f
         elif name == "a_to_b":
             self.p["vfob"] = self.f

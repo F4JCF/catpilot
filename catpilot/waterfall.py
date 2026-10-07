@@ -6,6 +6,8 @@ comme le fait WSJT-X : on voit environ 3 kHz autour de la fréquence affichée.
 """
 import collections
 import math
+import time
+import wave
 
 import numpy as np
 from PySide6.QtCore import QRectF, Qt, QTimer, Signal
@@ -92,6 +94,9 @@ class Waterfall(QWidget):
         self.floor = None
         self.message = "Chute d'eau arrêtée"
         self.marker = None            # fréquence audio où un clic amène le signal
+        self.rec = None               # fichier WAV en cours d'enregistrement
+        self.rec_path = ""
+        self.rec_start = 0.0
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
         self.timer.start(60)
@@ -114,6 +119,7 @@ class Waterfall(QWidget):
         self.message = ""
 
     def stop(self):
+        self.stop_recording()
         self.test = False
         if self.stream:
             try:
@@ -124,6 +130,27 @@ class Waterfall(QWidget):
             self.stream = None
         self.message = "Chute d'eau arrêtée"
         self.update()
+
+    # --- enregistrement de la réception ---------------------------------------------
+    def start_recording(self, path):
+        self.stop_recording()
+        w = wave.open(path, "wb")
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(self.sr)
+        self.rec, self.rec_path, self.rec_start = w, path, time.monotonic()
+
+    def stop_recording(self):
+        if self.rec:
+            try:
+                self.rec.close()
+            except Exception:
+                pass
+        self.rec = None
+
+    @property
+    def rec_seconds(self):
+        return time.monotonic() - self.rec_start if self.rec else 0
 
     @property
     def running(self):
@@ -154,6 +181,9 @@ class Waterfall(QWidget):
             new.append(self.chunks.popleft())
         if not new:
             return
+        if self.rec:
+            for chunk in new:
+                self.rec.writeframes((np.clip(chunk, -1, 1) * 32767).astype("<i2").tobytes())
         self.hist = np.concatenate([self.hist] + new)[-FFT_SIZE:]
         if len(self.hist) < FFT_SIZE:
             return
@@ -181,6 +211,12 @@ class Waterfall(QWidget):
             p.setPen(QPen(QColor(255, 255, 255, 160), 1))
             p.drawLine(int(x), 0, int(x), 5)
             p.drawText(QRectF(x - 20, 5, 40, 12), Qt.AlignCenter, f"{f}")
+        if self.rec:
+            p.setPen(QColor("#ff4040"))
+            p.setBrush(QColor("#ff2020"))
+            p.drawEllipse(6, 6, 9, 9)
+            secs = int(self.rec_seconds)
+            p.drawText(QRectF(20, 3, 90, 14), Qt.AlignLeft | Qt.AlignVCenter, f"REC {secs // 60:02d}:{secs % 60:02d}")
         if self.marker:
             x = r.width() * self.marker / self.FMAX
             p.setPen(QPen(QColor(255, 255, 255, 110), 1, Qt.DashLine))

@@ -19,7 +19,9 @@ from . import __version__
 from .controller import RigController
 from .drivers import DRIVERS
 from .drivers.sim import SimDriver
+from .docks import CwDock, MenuEditor, TxAudioDock
 from .memdock import MemoryDock, backup_dir
+from .propagation import FR as PROP_FR, Propagation
 from .rigctl_server import RigctlServer
 from .waterfall import Waterfall, guess_radio_input, list_inputs
 
@@ -245,6 +247,9 @@ class MainWindow(QMainWindow):
         self.server = None
         self.band_mem = json.loads(self.settings.value("band_mem", "{}"))
         self.toggles, self.sliders, self.combos = {}, {}, {}
+        self.extra_toggles = []
+        self._want_backup = False
+        self._want_restore = False
         self.controls = []
         self._updating = False
         self._last = None
@@ -266,6 +271,14 @@ class MainWindow(QMainWindow):
         self.mem.hide()
         self.b_mems.toggled.connect(self.mem.setVisible)
         self.mem.visibilityChanged.connect(self.b_mems.setChecked)
+        self.cw = CwDock(self)
+        self.txa = TxAudioDock(self)
+        for dock, btn in ((self.cw, self.b_cw), (self.txa, self.b_txa)):
+            self.addDockWidget(Qt.RightDockWidgetArea, dock)
+            self.tabifyDockWidget(self.mem, dock)
+            dock.hide()
+            btn.toggled.connect(dock.setVisible)
+            dock.visibilityChanged.connect(btn.setChecked)
         self._build_toolbar_and_menus()
         self._load_settings()
         self._set_enabled(False)
@@ -450,10 +463,13 @@ class MainWindow(QMainWindow):
         ml.addWidget(self.wf, 1)
         wh = QHBoxLayout()
         self.cb_audio = QComboBox()
-        self.cb_audio.setMinimumWidth(150)
+        self.cb_audio.setMinimumWidth(120)
+        self.cb_audio.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.cb_audio.setMinimumContentsLength(14)
         self.cb_audio.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.b_wf = QPushButton("Chute d'eau")
         self.b_wf.setCheckable(True)
+        self.b_wf.setMinimumWidth(95)
         self.b_wf.toggled.connect(self.toggle_waterfall)
         self.sl_contrast = QSlider(Qt.Horizontal)
         self.sl_contrast.setRange(15, 80)
@@ -472,14 +488,23 @@ class MainWindow(QMainWindow):
         self.lb_wf = QLabel("")
         self.lb_wf.setObjectName("value")
         self.lb_wf.setMinimumWidth(150)
+        # deux lignes : l'entrée audio a souvent un nom très long sous Windows
         wh.addWidget(self.cb_audio, 1)
         wh.addWidget(self.b_wf)
-        wh.addWidget(QLabel("Contraste"))
-        wh.addWidget(self.sl_contrast)
-        wh.addWidget(QLabel("Seuil"))
-        wh.addWidget(self.sl_level)
-        wh.addWidget(self.lb_wf)
         ml.addLayout(wh)
+        wh2 = QHBoxLayout()
+        wh2.addWidget(QLabel("Contraste"))
+        wh2.addWidget(self.sl_contrast)
+        wh2.addWidget(QLabel("Seuil"))
+        wh2.addWidget(self.sl_level)
+        self.b_rec = QPushButton("● Enregistrer")
+        self.b_rec.setCheckable(True)
+        self.b_rec.setToolTip("Enregistre l'audio de réception en WAV dans Documents\\CATPilot\\enregistrements")
+        self.b_rec.toggled.connect(self.toggle_recording)
+        wh2.addWidget(self.b_rec)
+        wh2.addStretch()
+        wh2.addWidget(self.lb_wf)
+        ml.addLayout(wh2)
         self.refresh_audio()
         g.addWidget(pm, 0, 3)
 
@@ -618,7 +643,12 @@ class MainWindow(QMainWindow):
         ll.addStretch()
         self.b_mems = QPushButton("Mémoires")
         self.b_mems.setCheckable(True)
-        ll.addWidget(self.b_mems)
+        self.b_cw = QPushButton("CW clavier")
+        self.b_cw.setCheckable(True)
+        self.b_txa = QPushButton("Audio TX")
+        self.b_txa.setCheckable(True)
+        for b in (self.b_mems, self.b_cw, self.b_txa):
+            ll.addWidget(b)
         lv.addLayout(ll)
         lo = QHBoxLayout()
         self.ck_auto = QCheckBox("Se connecter au lancement du logiciel")
@@ -689,6 +719,7 @@ class MainWindow(QMainWindow):
         s.setValue("pwr_band", json.dumps(self.pwr_band))
         s.setValue("profiles", json.dumps(self.profiles))
         self.mem.scanning = False
+        self.cw.save_settings(s)
         s.setValue("wf_contrast", self.sl_contrast.value())
         s.setValue("wf_level", self.sl_level.value())
         self.wf.stop()
@@ -724,6 +755,8 @@ class MainWindow(QMainWindow):
             self.cb_stop.setCurrentText(str(cls.default_stopbits))
         for w in (self.cb_port, self.cb_baud, self.cb_stop):
             w.setEnabled(cls is not SimDriver)
+        if hasattr(self, "mode_buttons") and not self.ctrl.connected:
+            self._adapt_to_rig(cls)
 
     def auto_connect(self):
         """Connexion automatique au lancement, si un port a déjà été utilisé."""
@@ -768,6 +801,7 @@ class MainWindow(QMainWindow):
             self.meter_s.set_value(0)
             self.meter_swr.set_value(0)
         self._set_enabled(ok)
+        self._adapt_to_rig(self.ctrl.driver if ok else DRIVERS.get(self.cb_rig.currentText()))
 
     def _set_enabled(self, on):
         for w in self.controls:
@@ -860,6 +894,7 @@ class MainWindow(QMainWindow):
                 return
         else:
             self.wf.stop()
+            self._uncheck(self.b_rec)
         self.cb_audio.setEnabled(not on)
 
     def on_wf_hover(self, audio_hz):
@@ -903,6 +938,25 @@ class MainWindow(QMainWindow):
         self.sp_tot.setSpecialValueText("désactivée")
         self.sp_tot.setToolTip("Coupe l'émission si elle dure plus longtemps (quel que soit le logiciel)")
         tb.addWidget(self.sp_tot)
+        tb.addSeparator()
+        self.lb_utc = QLabel("")
+        self.lb_utc.setObjectName("info")
+        self.lb_utc.setToolTip("Heure UTC (heure locale entre parenthèses)")
+        tb.addWidget(self.lb_utc)
+        tb.addSeparator()
+        self.b_prop = QPushButton("Propagation…")
+        self.b_prop.setFlat(True)
+        self.b_prop.setStyleSheet("QPushButton { border: none; background: transparent; text-align: left; }")
+        self.b_prop.setToolTip("Clic : actualiser")
+        self.b_prop.clicked.connect(lambda: self.prop.refresh())
+        tb.addWidget(self.b_prop)
+        self.prop = Propagation()
+        self.prop.updated.connect(self.on_propagation)
+        QTimer.singleShot(1500, self.prop.refresh)
+        self._clock = QTimer(self)
+        self._clock.timeout.connect(self.update_clock)
+        self._clock.start(1000)
+        self.update_clock()
 
         mb = self.menuBar()
         m = mb.addMenu("Poste")
@@ -917,6 +971,15 @@ class MainWindow(QMainWindow):
             a = QAction(label, self)
             a.triggered.connect(slot)
             m.addAction(a)
+        aff = mb.addMenu("Affichage")
+        for label, btn in (("Mémoires et scan", self.b_mems), ("CW au clavier", self.b_cw),
+                           ("Audio d'émission", self.b_txa)):
+            a = QAction(label, self)
+            a.triggered.connect(lambda _c=False, b=btn: b.setChecked(True))
+            aff.addAction(a)
+        a = QAction("Menus du poste…", self)
+        a.triggered.connect(lambda: self.open_menu_editor(""))
+        m.addAction(a)
         h = mb.addMenu("Aide")
         a = QAction("Raccourcis clavier", self)
         a.triggered.connect(self.show_shortcuts)
@@ -933,7 +996,9 @@ class MainWindow(QMainWindow):
         sc("PgDown", lambda: self.band_step(-1))
         sc("Ctrl+M", lambda: self.b_mems.toggle())
         sc("Ctrl+W", lambda: self.b_wf.toggle())
-        sc("Escape", lambda: self.mem.scanning and self.mem.b_scan.setChecked(False))
+        sc("Escape", self.escape)
+        for i in range(5):
+            sc(f"Alt+F{i + 1}", lambda n=i: self.cw.send(self.cw.macros[n].text()))
 
     def show_shortcuts(self):
         QMessageBox.information(self, "Raccourcis clavier", (
@@ -943,7 +1008,8 @@ class MainWindow(QMainWindow):
             "Page préc. / Page suiv. : bande suivante / précédente\n"
             "Ctrl + M : panneau des mémoires\n"
             "Ctrl + W : chute d'eau marche / arrêt\n"
-            "Échap : arrêter le scan\n\n"
+            "Alt + F1 à F5 : messages CW programmables\n"
+            "Échap : arrêter le scan et la CW\n\n"
             "Molette sur un chiffre de la fréquence : régler ce chiffre.\n"
             "Bouton d'accord USB (ShuttleXpress, PowerMate…) : programmez-le dans son "
             "propre logiciel pour envoyer Ctrl + ↑ et Ctrl + ↓."))
@@ -1066,6 +1132,7 @@ class MainWindow(QMainWindow):
         if not self.ctrl.connected:
             QMessageBox.information(self, "Sauvegarde", "Connectez d'abord le poste.")
             return
+        self._want_backup = True
         self.ctrl.job("read_menus")
 
     def restore_menus(self):
@@ -1078,7 +1145,7 @@ class MainWindow(QMainWindow):
         try:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
-            menus = {int(k): str(v) for k, v in data["menus"].items()}
+            menus = {str(k): str(v) for k, v in data["menus"].items()}
         except Exception as e:
             QMessageBox.warning(self, "Fichier illisible", f"Ce fichier n'est pas une sauvegarde CAT Pilot.\n\n{e}")
             return
@@ -1087,8 +1154,12 @@ class MainWindow(QMainWindow):
                + (f" et {len(mems)} mémoires." if mems else ".")
                + "\n\nSeuls les menus différents seront réécrits. Les menus CAT (031 à 033) "
                  "ne sont jamais modifiés, pour ne pas couper la liaison.\n\nRestaurer les menus ?")
+        rig = self.ctrl.driver.name
+        if data.get("poste") and data["poste"] != rig:
+            txt = f"Attention : cette sauvegarde vient d'un {data['poste']}, le poste connecté est un {rig}.\n\n" + txt
         if QMessageBox.question(self, "Restaurer les menus", txt) != QMessageBox.Yes:
             return
+        self._want_restore = True
         self._restore_mems = mems if mems and QMessageBox.question(
             self, "Mémoires", f"Restaurer aussi les {len(mems)} mémoires de la sauvegarde ?") == QMessageBox.Yes else []
         self.ctrl.job("write_menus", menus)
@@ -1098,35 +1169,137 @@ class MainWindow(QMainWindow):
             if name in ("read_menus", "write_menus", "power_on"):
                 QMessageBox.warning(self, "Erreur", f"{name} : {res}")
             return
-        if name == "read_menus":
+        if name == "read_menus" and self._want_backup:
+            self._want_backup = False
             if not res:
                 QMessageBox.warning(self, "Sauvegarde", "Le poste n'a renvoyé aucun menu.")
                 return
             stamp = datetime.datetime.now()
-            default = os.path.join(backup_dir(), f"sauvegarde_FT991A_{stamp:%Y-%m-%d_%H%M}.json")
+            rig = self.ctrl.driver.name.replace("Yaesu ", "").replace(" ", "").replace("/", "-")
+            default = os.path.join(backup_dir(), f"sauvegarde_{rig}_{stamp:%Y-%m-%d_%H%M}.json")
             path, _ = QFileDialog.getSaveFileName(self, "Enregistrer la sauvegarde", default, "Sauvegarde (*.json)")
             if not path:
                 return
-            data = {"poste": "Yaesu FT-991A", "logiciel": f"CAT Pilot {__version__}",
+            data = {"poste": self.ctrl.driver.name, "logiciel": f"CAT Pilot {__version__}",
                     "date": f"{stamp:%d/%m/%Y %H:%M}",
-                    "menus": {f"{n:03d}": v for n, v in sorted(res.items())},
+                    "menus": dict(sorted(res.items())),
                     "memoires": [{k: v for k, v in m.items()} for m in self.mem.read_copy]}
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=1)
             extra = (f" et {len(self.mem.read_copy)} mémoires" if self.mem.read_copy
                      else " (mémoires non incluses : lisez-les d'abord pour les ajouter)")
             QMessageBox.information(self, "Sauvegarde terminée", f"{len(res)} menus{extra} enregistrés dans\n{path}")
-        elif name == "write_menus":
+        elif name == "write_menus" and self._want_restore:
+            self._want_restore = False
             msg = (f"Menus modifiés : {len(res['changed'])}\nDéjà identiques : {res['same']}\n"
                    f"Non modifiables ou en échec : {len(res['failed'])}")
             if res["failed"]:
-                msg += " (" + ", ".join(f"{n:03d}" for n in res["failed"][:20]) + ")"
+                msg += " (" + ", ".join(res["failed"][:20]) + ")"
             QMessageBox.information(self, "Restauration des menus", msg)
             mems = getattr(self, "_restore_mems", [])
             if mems:
                 template = (self.mem.read_copy or mems)[0].get("raw", "")
                 self.ctrl.job("write_memories", mems, template)
                 self._restore_mems = []
+
+    # --- adaptation au poste ------------------------------------------------------------------
+    def _adapt_to_rig(self, drv):
+        if not drv:
+            return
+        self.setWindowTitle(f"CAT Pilot {__version__} — {drv.name if drv.name != 'Simulateur' else 'simulateur'}")
+        maxf = getattr(drv, "max_freq", 470_000_000)
+        for name, lo, _hi, _d in BANDS:
+            self.band_buttons[name].setVisible(lo <= maxf)
+        self.mode_buttons["C4FM"].setVisible(getattr(drv, "has_c4fm", True))
+        if not getattr(drv, "has_usb_audio", True):
+            self.cb_audio.setToolTip("Ce poste n'a pas de carte son USB : choisissez l'entrée de votre "
+                                     "interface audio (SCU-17, Signalink…)")
+
+    def escape(self):
+        if self.mem.scanning:
+            self.mem.b_scan.setChecked(False)
+        self.cw.stop()
+
+    def open_menu_editor(self, flt):
+        if not self.ctrl.connected:
+            QMessageBox.information(self, "Menus", "Connectez d'abord le poste.")
+            return
+        MenuEditor(self, flt).show()
+
+    # --- horloge et propagation ----------------------------------------------------------------
+    def update_clock(self):
+        now = datetime.datetime.now(datetime.timezone.utc)
+        local = datetime.datetime.now()
+        self.lb_utc.setText(f"UTC {now:%H:%M:%S}  ({local:%H:%M})")
+
+    def on_propagation(self, data):
+        if isinstance(data, Exception):
+            self.b_prop.setText("Propagation : indisponible")
+            self.b_prop.setToolTip(f"Données hamqsl.com inaccessibles ({data}). Clic : réessayer")
+            return
+        day = 7 <= datetime.datetime.now().hour < 19
+        when = "day" if day else "night"
+        colors = {"Good": GREEN, "Fair": AMBER, "Poor": RED}
+        bands = []
+        for name in ("80m-40m", "30m-20m", "17m-15m", "12m-10m"):
+            cond = data["bands"].get((name, when), "")
+            short = name.replace("m-", "-").replace("m", "")
+            bands.append(f"{short} <span style='color:{colors.get(cond, TEXT)}'>●</span>")
+        k = data.get("kindex", "?")
+        self.b_prop.setText("")
+        lbl = getattr(self, "_prop_label", None)
+        if lbl is None:
+            lbl = self._prop_label = QLabel(self.b_prop)
+            lbl.setTextFormat(Qt.RichText)
+            lbl.setAttribute(Qt.WA_TransparentForMouseEvents)
+            lay = QHBoxLayout(self.b_prop)
+            lay.setContentsMargins(4, 0, 4, 0)
+            lay.addWidget(lbl)
+        lbl.setText(f"SFI <b>{data.get('solarflux', '?')}</b>&nbsp; A <b>{data.get('aindex', '?')}</b>&nbsp; "
+                    f"K <b>{k}</b>&nbsp; SN <b>{data.get('sunspots', '?')}</b>&nbsp;&nbsp; "
+                    + "&nbsp; ".join(bands) + f"&nbsp; <span style='color:#8a8a8a'>({'jour' if day else 'nuit'})</span>")
+        self.b_prop.setMinimumWidth(lbl.sizeHint().width() + 10)
+        details = "\n".join(f"{n.replace('m-', '-')} : jour {PROP_FR.get(data['bands'].get((n, 'day'), ''), '?')}, "
+                             f"nuit {PROP_FR.get(data['bands'].get((n, 'night'), ''), '?')}"
+                             for n in ("80m-40m", "30m-20m", "17m-15m", "12m-10m"))
+        self.b_prop.setToolTip(f"Flux solaire {data.get('solarflux')}, indice A {data.get('aindex')}, "
+                               f"indice K {k}, taches {data.get('sunspots')}, rayons X {data.get('xray')}\n"
+                               f"Champ géomagnétique : {data.get('geomagfield')}, bruit : {data.get('signalnoise')}\n\n"
+                               f"{details}\n\nSource hamqsl.com (N0NBH), mise à jour {data.get('updated')}.\n"
+                               "Clic : actualiser")
+
+    # --- enregistrement ------------------------------------------------------------------------------
+    def toggle_recording(self, on):
+        if on:
+            if not self.wf.running:
+                self.b_wf.setChecked(True)
+                if not self.wf.running:
+                    self._uncheck(self.b_rec)
+                    return
+            st = self._last
+            d = os.path.join(os.path.expanduser("~"), "Documents", "CATPilot", "enregistrements")
+            os.makedirs(d, exist_ok=True)
+            tag = f"_{st.freq // 1000}kHz_{MODE_LABELS.get(st.mode, st.mode)}" if st and self.ctrl.connected else ""
+            path = os.path.join(d, f"RX_{datetime.datetime.now():%Y%m%d_%H%M%S}{tag}.wav")
+            try:
+                self.wf.start_recording(path)
+            except Exception as e:
+                QMessageBox.warning(self, "Enregistrement", f"Impossible de créer le fichier.\n\n{e}")
+                self._uncheck(self.b_rec)
+                return
+            self.statusBar().showMessage(f"Enregistrement en cours : {path}")
+        else:
+            path = self.wf.rec_path
+            secs = int(self.wf.rec_seconds)
+            self.wf.stop_recording()
+            if path:
+                self.statusBar().showMessage(f"Enregistrement terminé ({secs} s) : {path}")
+
+    @staticmethod
+    def _uncheck(btn):
+        btn.blockSignals(True)
+        btn.setChecked(False)
+        btn.blockSignals(False)
 
     # --- serveur -----------------------------------------------------------------------
     def toggle_server(self, on):
@@ -1186,6 +1359,10 @@ class MainWindow(QMainWindow):
             self.band_group.setExclusive(True)
 
         for key, btn in self.toggles.items():
+            if key in p:
+                btn.setChecked(bool(p[key]))
+            btn.setEnabled(key not in unsup)
+        for key, btn in self.extra_toggles:
             if key in p:
                 btn.setChecked(bool(p[key]))
             btn.setEnabled(key not in unsup)

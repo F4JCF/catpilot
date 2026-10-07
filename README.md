@@ -1,6 +1,6 @@
-# CAT Pilot 0.5 — Yaesu FT-991A
+# CAT Pilot 0.6 — Yaesu FT-991A et FT-891
 
-Logiciel de pilotage CAT du Yaesu FT-991A sous Windows, avec partage du CAT
+Logiciel de pilotage CAT des Yaesu FT-991A et FT-891 sous Windows, avec partage du CAT
 vers WSJT-X, JTDX, Log4OM, N1MM… grâce à un serveur compatible rigctld.
 
 ## Obtenir l'exécutable
@@ -74,6 +74,37 @@ Le poste « Simulateur » permet de tout essayer sans radio.
   signal au-dessus du seuil choisi, écoute de quelques secondes puis reprise
   (0 s = arrêt définitif sur le signal).
 
+### Horloge et propagation (barre du haut)
+- Heure UTC (et locale), flux solaire, indices A et K, taches solaires, et état
+  des bandes 80-40 / 30-20 / 17-15 / 12-10 (vert bonne, orange moyenne, rouge
+  mauvaise, jour ou nuit selon l'heure locale). Données hamqsl.com (N0NBH),
+  actualisées toutes les 30 min ou par un clic. Détails dans l'infobulle.
+
+### CW au clavier (bouton « CW clavier »)
+- Texte libre, 5 messages programmables (F1 à F5 ou Alt+F1 à F5) avec
+  {MYCALL}, {CALL}, <BT>, <SK>, <AR>, <KN>, et lecture des 5 mémoires du keyer
+  du poste. La vitesse est celle du keyer du poste (curseur du cadre CW).
+- Deux méthodes : **mémoire 5 du keyer du poste** (CAT, rien à régler, mais
+  cette mémoire est réécrite ; un message déjà parti se termine même après
+  Stop), ou **ligne DTR / RTS du port COM Standard** (régler le menu PC KEYING
+  du poste ; CAT Pilot active BK-IN si besoin).
+
+### Enregistrement de la réception
+- « ● Enregistrer » sous la chute d'eau : fichier WAV de l'audio reçu, nommé avec
+  la date, la fréquence et le mode, dans Documents\CATPilot\enregistrements.
+
+### Audio d'émission (bouton « Audio TX »)
+- Égaliseur micro marche/arrêt, processeur et son niveau, moniteur et son
+  niveau, VOX et son gain. Le réglage fin de l'égaliseur (3 bandes) se fait dans
+  l'**éditeur des menus** (bouton « Menus de l'égaliseur… »), avec sauvegarde
+  automatique avant la première modification. Les noms de menus affichés sont
+  indicatifs : à comparer avec l'écran du poste avant d'écrire.
+
+### FT-891
+- Même interface ; 2 m, 70 cm et C4FM sont masqués. Le FT-891 n'a pas de carte
+  son USB : pour la chute d'eau et l'enregistrement, choisir l'entrée d'une
+  interface audio externe (SCU-17…). Menus en groupe-item (05-06 = CAT RATE).
+
 ### Sauvegarde du poste (menu « Poste »)
 - **Sauvegarder les menus du poste** : tous les réglages du menu, plus les
   mémoires si elles ont été lues, dans un fichier .json.
@@ -107,9 +138,12 @@ PTT par sécurité. Même chose à la fermeture de CAT Pilot.
 ## À valider sur le poste
 
 Points à vérifier au premier essai : l'écriture d'une mémoire (essayer d'abord
-sur un canal libre), la restauration des menus, les QMB.
+sur un canal libre), la restauration des menus, les QMB, la CW par le keyer du
+poste, les réglages du cadre « Audio TX » (ils se grisent si le poste les
+refuse), et l'ensemble des fonctions sur le FT-891, qui n'a été testé qu'avec
+un poste simulé.
 
 ## Pas encore inclus
 
-Messages CW, égaliseur micro, DX cluster, carnet de trafic,
+DX cluster, spots POTA/SOTA, carnet de trafic,
 panoramique large de toute la bande (il faudrait un SDR branché sur le poste).

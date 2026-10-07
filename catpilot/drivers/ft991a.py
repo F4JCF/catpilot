@@ -35,6 +35,11 @@ PARAMS = {
     "mic":       P("MG;", 2, "int", "MG{:03d};"),       # gain micro 0-100
     "proc":      P("PR0;", 3, "bool", "PR0{:d};"),      # processeur de modulation
     "vox":       P("VX;", 2, "bool", "VX{:d};"),
+    "vox_gain":  P("VG;", 2, "int", "VG{:03d};"),       # gain VOX 0-100
+    "mic_eq":    P("PR1;", 3, "bool", "PR1{:d};"),      # égaliseur micro paramétrique
+    "proc_lvl":  P("PL;", 2, "int", "PL{:03d};"),       # niveau du processeur 0-100
+    "mon":       P("ML0;", 3, "bool", "ML0{:03d};"),    # moniteur d'émission
+    "mon_lvl":   P("ML1;", 3, "int", "ML1{:03d};"),     # niveau du moniteur 0-100
     "nb":        P("NB0;", 3, "bool", "NB0{:d};"),
     "dnr":       P("NR0;", 3, "bool", "NR0{:d};"),
     "dnr_lvl":   P("RL0;", 3, "int", "RL0{:02d};"),     # niveau DNR 1-15
@@ -71,7 +76,7 @@ ACTIONS = {
     "qmb_store": "QI;", "qmb_recall": "QR;",
 }
 # Menus jamais réécrits lors d'une restauration : les changer couperait la liaison CAT.
-MENU_SKIP = {31, 32, 33}        # CAT RATE, CAT TOT, CAT RTS
+MENU_SKIP = {"031", "032", "033"}        # CAT RATE, CAT TOT, CAT RTS
 
 
 def parse_mem(s):
@@ -97,6 +102,11 @@ class FT991A(RigDriver):
     modes = [m for m in MODE_TO_CODE if m != "C4FM"]   # modes exposés à Hamlib
     default_baud = 38400
     default_stopbits = 1
+    max_freq = 470_000_000          # le FT-991A couvre aussi 2 m et 70 cm
+    has_c4fm = True
+    has_usb_audio = True            # codec audio USB intégré
+    menu_skip = MENU_SKIP
+    menu_stop_after = 0             # lire toute la plage de menus
 
     def __init__(self, *a):
         super().__init__(*a)
@@ -284,37 +294,63 @@ class FT991A(RigDriver):
             out.append((int(m["ch"]), ok))
         return out
 
+    # --- menus du poste (commande EX) -----------------------------------------------
+    # Identifiants en texte : « 031 » sur le FT-991A, « 0506 » (groupe-item) sur le FT-891.
+    def menu_ids(self):
+        return [f"{n:03d}" for n in range(1, 161)]
+
+    def read_menu(self, mid):
+        return self._query(f"EX{mid};")[2 + len(mid):]
+
+    def write_menu(self, mid, value):
+        """Écrit un menu puis le relit. Renvoie True si la valeur est bien en place."""
+        if mid in self.menu_skip:
+            return False
+        self._write(f"EX{mid}{value};")
+        time.sleep(0.08)
+        return self.read_menu(mid) == value
+
     def read_menus(self, progress=None):
-        menus = {}
-        for n in range(1, 161):
-            if progress and n % 10 == 0:
-                progress(f"Lecture des menus du poste… {n}")
+        menus, misses = {}, 0
+        for i, mid in enumerate(self.menu_ids(), 1):
+            if progress and i % 10 == 0:
+                progress(f"Lecture des menus du poste… {mid}")
             try:
-                menus[n] = self._query(f"EX{n:03d};")[5:]
+                menus[mid] = self.read_menu(mid)
+                misses = 0
             except RigError:
-                pass
+                misses += 1
+                if self.menu_stop_after and misses >= self.menu_stop_after and menus:
+                    break
         return menus
 
     def write_menus(self, menus, progress=None):
-        res = {"changed": [], "same": 0, "failed": [], "skipped": sorted(MENU_SKIP & set(menus))}
-        for i, (n, value) in enumerate(sorted(menus.items()), 1):
-            if n in MENU_SKIP:
+        res = {"changed": [], "same": 0, "failed": [], "skipped": sorted(self.menu_skip & set(menus))}
+        for i, (mid, value) in enumerate(sorted(menus.items()), 1):
+            if mid in self.menu_skip:
                 continue
             if progress and i % 10 == 0:
                 progress(f"Restauration des menus… {i}/{len(menus)}")
             try:
-                if self._query(f"EX{n:03d};")[5:] == value:
+                if self.read_menu(mid) == value:
                     res["same"] += 1
-                    continue
-                self._write(f"EX{n:03d}{value};")
-                time.sleep(0.08)
-                if self._query(f"EX{n:03d};")[5:] == value:
-                    res["changed"].append(n)
+                elif self.write_menu(mid, value):
+                    res["changed"].append(mid)
                 else:
-                    res["failed"].append(n)
+                    res["failed"].append(mid)
             except RigError:
-                res["failed"].append(n)
+                res["failed"].append(mid)
         return res
+
+    # --- CW au clavier par la mémoire du keyer du poste --------------------------------
+    def cw_send(self, text, slot=5):
+        """Écrit le texte dans la mémoire de keyer « slot » puis la fait jouer."""
+        self._write(f"KM{slot}{text}}};")      # « } » marque la fin du message
+        time.sleep(0.1)
+        self._write(f"KY{slot};")
+
+    def cw_play(self, slot):
+        self._write(f"KY{int(slot)};")
 
     # --- commandes ---------------------------------------------------------
     def set_freq(self, hz):
@@ -335,7 +371,11 @@ class FT991A(RigDriver):
             self._write(p.fmt.format(bool(value) if p.kind == "bool" else int(value)))
 
     def action(self, name, *args):
-        if name == "mem_recall":
+        if name == "cw_text":
+            self.cw_send(*args)
+        elif name == "cw_play":
+            self.cw_play(*args)
+        elif name == "mem_recall":
             self._write(f"MC{int(args[0]):03d};")
         elif name == "clar_step":
             hz = int(args[0])
