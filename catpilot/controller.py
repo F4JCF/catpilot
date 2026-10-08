@@ -106,7 +106,8 @@ class RigController(QObject):
         return self._set("p:" + key, value)
 
     def set_power(self, watts):
-        return self.set_param("pwr", max(5, min(100, int(watts))))
+        top = getattr(self.driver, "max_power", 100)
+        return self.set_param("pwr", max(1 if top < 20 else 5, min(top, int(round(watts)))))
 
     def action(self, name, *args):
         if self.connected:

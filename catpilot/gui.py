@@ -410,10 +410,10 @@ class MainWindow(QMainWindow):
         h.addWidget(self._btn("UP", lambda: self.step_mem_or_vfo(+1)))
         h.addWidget(self._btn("DN", lambda: self.step_mem_or_vfo(-1)))
         h.addSpacing(10)
-        b = self._btn("QMB STO", lambda: self.ctrl.action("qmb_store"))
+        b = self.b_qmb_sto = self._btn("QMB STO", lambda: self.ctrl.action("qmb_store"))
         b.setToolTip("Mémoire rapide : enregistrer la fréquence actuelle")
         h.addWidget(b)
-        b = self._btn("QMB RCL", lambda: self.ctrl.action("qmb_recall"))
+        b = self.b_qmb_rcl = self._btn("QMB RCL", lambda: self.ctrl.action("qmb_recall"))
         b.setToolTip("Mémoire rapide : rappeler (clics successifs = mémoires suivantes)")
         h.addWidget(b)
         vl.addLayout(h)
@@ -620,7 +620,7 @@ class MainWindow(QMainWindow):
         b_ref.setToolTip("Actualiser la liste des ports")
         b_ref.clicked.connect(self.refresh_ports)
         self.cb_baud = QComboBox()
-        self.cb_baud.addItems(["4800", "9600", "19200", "38400"])
+        self.cb_baud.addItems(["4800", "9600", "19200", "38400", "57600", "115200"])
         self.cb_stop = QComboBox()
         self.cb_stop.addItems(["1", "2"])
         self.b_conn = QPushButton("Connecter")
@@ -1211,6 +1211,12 @@ class MainWindow(QMainWindow):
         for name, lo, _hi, _d in BANDS:
             self.band_buttons[name].setVisible(lo <= maxf)
         self.mode_buttons["C4FM"].setVisible(getattr(drv, "has_c4fm", True))
+        for b in (self.b_qmb_sto, self.b_qmb_rcl):
+            b.setVisible(getattr(drv, "has_qmb", True))
+        top = getattr(drv, "max_power", 100)
+        sl = self.sliders["pwr"][0]
+        sl.setRange(1 if top < 20 else 5, top)
+        self.ck_on.setToolTip("Le poste doit rester alimenté et relié en USB")
         if not getattr(drv, "has_usb_audio", True):
             self.cb_audio.setToolTip("Ce poste n'a pas de carte son USB : choisissez l'entrée de votre "
                                      "interface audio (SCU-17, Signalink…)")

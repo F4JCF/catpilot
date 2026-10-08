@@ -1,6 +1,6 @@
-# CAT Pilot 0.6 — Yaesu FT-991A et FT-891
+# CAT Pilot 0.7 — Yaesu FT-991A, FT-891 et Icom IC-705
 
-Logiciel de pilotage CAT des Yaesu FT-991A et FT-891 sous Windows, avec partage du CAT
+Logiciel de pilotage CAT des Yaesu FT-991A, FT-891 et de l'Icom IC-705 sous Windows, avec partage du CAT
 vers WSJT-X, JTDX, Log4OM, N1MM… grâce à un serveur compatible rigctld.
 
 ## Obtenir l'exécutable
@@ -104,6 +104,19 @@ Le poste « Simulateur » permet de tout essayer sans radio.
 - Même interface ; 2 m, 70 cm et C4FM sont masqués. Le FT-891 n'a pas de carte
   son USB : pour la chute d'eau et l'enregistrement, choisir l'entrée d'une
   interface audio externe (SCU-17…). Menus en groupe-item (05-06 = CAT RATE).
+
+### Icom IC-705
+- Choisir « Icom IC-705 », le port COM du câble USB, vitesse **115200**.
+  Sur le poste : MENU > SET > Connectors > CI-V : CI-V USB Baud Rate « Auto »
+  (ou 115200), adresse CI-V **A4h** (par défaut).
+- Pris en charge : fréquence, VFO B, A/B, split, modes (dont DATA), PTT,
+  S-mètre, puissance (0,5 à 10 W), ROS, ALC, volume, gain HF, squelch, micro,
+  processeur, VOX, moniteur, NB, NR, notch auto et manuel, ATT, préampli, AGC,
+  break-in, vitesse et note CW, RIT/ΔTX, décalage relais et CTCSS, CW au clavier
+  (commande CI-V directe), allumage/extinction, chute d'eau (codec USB intégré).
+- Grisés car sans équivalent : largeur et shift façon Yaesu, contour, APF,
+  NAR, keyer, QMB, mémoires du keyer. Pas encore pris en charge : lecture et
+  écriture des mémoires, sauvegarde des menus, mode DV.
 
 ### Sauvegarde du poste (menu « Poste »)
 - **Sauvegarder les menus du poste** : tous les réglages du menu, plus les

@@ -158,11 +158,11 @@ class RigctlServer:
                 if name == "STRENGTH":
                     return f"{st.s_db}\n"
                 if name == "RFPOWER":
-                    return f"{st.p.get('pwr', 0) / 100:.6f}\n"
+                    return f"{st.p.get('pwr', 0) / getattr(drv, 'max_power', 100):.6f}\n"
                 return ERR_NAVAIL
             if cmd == "L":
                 if args and args[0].upper() == "RFPOWER":
-                    self.ctrl.set_power(round(float(args[1]) * 100))
+                    self.ctrl.set_power(float(args[1]) * getattr(drv, "max_power", 100))
                     return OK
                 return ERR_NAVAIL
         except (IndexError, ValueError):
