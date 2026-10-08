@@ -22,6 +22,7 @@ from .drivers.sim import SimDriver
 from .docks import CwDock, MenuEditor, TxAudioDock
 from .memdock import MemoryDock, backup_dir
 from .propagation import FR as PROP_FR, Propagation
+from .updater import PAGE as RELEASES_PAGE, Updater, can_self_update, install_and_restart, is_newer
 from .rigctl_server import RigctlServer
 from .waterfall import Waterfall, guess_radio_input, list_inputs
 
@@ -723,10 +724,11 @@ class MainWindow(QMainWindow):
         s.setValue("wf_contrast", self.sl_contrast.value())
         s.setValue("wf_level", self.sl_level.value())
         self.wf.stop()
-        if self.ctrl.connected and self.ck_off.isChecked():
+        power_off = self.ck_off.isChecked() and not self._restart_for_update
+        if self.ctrl.connected and power_off:
             self.statusBar().showMessage("Extinction du poste…")
             QApplication.processEvents()
-        self.ctrl.disconnect_rig(power_off=self.ck_off.isChecked())
+        self.ctrl.disconnect_rig(power_off=power_off)
         if self.server:
             self.server.stop()
         super().closeEvent(e)
@@ -984,6 +986,32 @@ class MainWindow(QMainWindow):
         a = QAction("Raccourcis clavier", self)
         a.triggered.connect(self.show_shortcuts)
         h.addAction(a)
+        a = QAction("À propos de CAT Pilot", self)
+        a.triggered.connect(lambda: QMessageBox.about(
+            self, "CAT Pilot", f"CAT Pilot {__version__}\nPilotage CAT FT-991A, FT-891 et IC-705\nF4JCF"))
+        h.addAction(a)
+
+        # Mise à jour, à côté de « Aide »
+        self.upd = Updater()
+        self.upd.checked.connect(self.on_update_checked)
+        self.upd.progress.connect(self.on_update_progress)
+        self.upd.downloaded.connect(self.on_update_downloaded)
+        self._upd_dialog = None
+        self._restart_for_update = False
+        self.menu_upd = mb.addMenu("Mise à jour")
+        a = QAction("Vérifier les mises à jour…", self)
+        a.triggered.connect(lambda: self.upd.check(manual=True))
+        self.menu_upd.addAction(a)
+        self.act_upd_start = QAction("Vérifier au démarrage", self, checkable=True)
+        self.act_upd_start.setChecked(self.settings.value("update_check", "true") == "true")
+        self.act_upd_start.toggled.connect(
+            lambda on: self.settings.setValue("update_check", "true" if on else "false"))
+        self.menu_upd.addAction(self.act_upd_start)
+        a = QAction("Voir toutes les versions sur GitHub", self)
+        a.triggered.connect(self.open_releases_page)
+        self.menu_upd.addAction(a)
+        if self.act_upd_start.isChecked():
+            QTimer.singleShot(4000, lambda: self.upd.check(manual=False))
 
         def sc(keys, slot):
             QShortcut(QKeySequence(keys), self, activated=slot)
@@ -1306,6 +1334,89 @@ class MainWindow(QMainWindow):
         btn.blockSignals(True)
         btn.setChecked(False)
         btn.blockSignals(False)
+
+    # --- mises à jour ------------------------------------------------------------------------
+    def open_releases_page(self):
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        QDesktopServices.openUrl(QUrl(RELEASES_PAGE))
+
+    def on_update_checked(self, info, manual):
+        if isinstance(info, Exception):
+            if manual:
+                QMessageBox.warning(self, "Mise à jour",
+                                    f"Impossible de vérifier les mises à jour.\n\n{info}")
+            return
+        if not is_newer(info["version"]):
+            self.menu_upd.setTitle("Mise à jour")
+            if manual:
+                QMessageBox.information(self, "Mise à jour",
+                                        f"Vous avez déjà la dernière version ({__version__}).")
+            return
+        if not manual and self.settings.value("update_skip", "") == info["version"]:
+            self.menu_upd.setTitle("Mise à jour ●")
+            return
+        self.menu_upd.setTitle("Mise à jour ●")
+        self.statusBar().showMessage(f"Nouvelle version disponible : {info['version']}")
+        notes = info["notes"].strip()
+        if len(notes) > 900:
+            notes = notes[:900] + "…"
+        box = QMessageBox(self)
+        box.setWindowTitle("Mise à jour disponible")
+        box.setText(f"<b>CAT Pilot {info['version']}</b> est disponible (vous avez la {__version__}).")
+        box.setInformativeText((notes + "\n\n" if notes else "") +
+                               ("Le logiciel sera fermé, mis à jour puis relancé automatiquement."
+                                if can_self_update() else
+                                "Mise à jour automatique possible uniquement avec CATPilot.exe : "
+                                "la page de téléchargement va s'ouvrir."))
+        b_now = box.addButton("Mettre à jour maintenant", QMessageBox.AcceptRole)
+        b_later = box.addButton("Plus tard", QMessageBox.RejectRole)
+        b_skip = box.addButton("Ignorer cette version", QMessageBox.DestructiveRole) if not manual else None
+        box.setDefaultButton(b_now)
+        box.exec()
+        if box.clickedButton() is b_skip:
+            self.settings.setValue("update_skip", info["version"])
+            return
+        if box.clickedButton() is not b_now:
+            return
+        if not can_self_update() or not info.get("url"):
+            self.open_releases_page()
+            return
+        if self._last and self._last.ptt:
+            QMessageBox.warning(self, "Mise à jour", "Le poste est en émission : réessayez après.")
+            return
+        from PySide6.QtWidgets import QProgressDialog
+        self._upd_dialog = QProgressDialog(f"Téléchargement de CAT Pilot {info['version']}…",
+                                           "Annuler", 0, 100, self)
+        self._upd_dialog.setWindowTitle("Mise à jour")
+        self._upd_dialog.setWindowModality(Qt.WindowModal)
+        self._upd_dialog.setMinimumDuration(0)
+        self._upd_dialog.canceled.connect(self.upd.cancel)
+        self._upd_dialog.setValue(0)
+        self.upd.download(info)
+
+    def on_update_progress(self, done, total):
+        dlg = self._upd_dialog
+        if dlg and total:
+            dlg.setLabelText(f"Téléchargement… {done / 1e6:.1f} / {total / 1e6:.1f} Mo")
+            dlg.setValue(min(99, int(done * 100 / total)))
+
+    def on_update_downloaded(self, path):
+        if self._upd_dialog:
+            self._upd_dialog.reset()
+            self._upd_dialog = None
+        if isinstance(path, Exception):
+            if "annulé" not in str(path):
+                QMessageBox.warning(self, "Mise à jour", f"Le téléchargement a échoué.\n\n{path}")
+            return
+        try:
+            install_and_restart(path)
+        except Exception as e:
+            QMessageBox.warning(self, "Mise à jour", f"L'installation n'a pas pu démarrer.\n\n{e}")
+            return
+        self._restart_for_update = True       # ne pas éteindre le poste pour un simple redémarrage
+        self.statusBar().showMessage("Mise à jour : redémarrage de CAT Pilot…")
+        self.close()
 
     # --- serveur -----------------------------------------------------------------------
     def toggle_server(self, on):

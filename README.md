@@ -1,4 +1,4 @@
-# CAT Pilot 0.7 — Yaesu FT-991A, FT-891 et Icom IC-705
+# CAT Pilot 0.8 — Yaesu FT-991A, FT-891 et Icom IC-705
 
 Logiciel de pilotage CAT des Yaesu FT-991A, FT-891 et de l'Icom IC-705 sous Windows, avec partage du CAT
 vers WSJT-X, JTDX, Log4OM, N1MM… grâce à un serveur compatible rigctld.
@@ -104,6 +104,17 @@ Le poste « Simulateur » permet de tout essayer sans radio.
 - Même interface ; 2 m, 70 cm et C4FM sont masqués. Le FT-891 n'a pas de carte
   son USB : pour la chute d'eau et l'enregistrement, choisir l'entrée d'une
   interface audio externe (SCU-17…). Menus en groupe-item (05-06 = CAT RATE).
+
+### Mise à jour (menu « Mise à jour », à côté de « Aide »)
+- « Vérifier les mises à jour… » consulte la dernière version publiée sur
+  GitHub ; « Mettre à jour maintenant » télécharge CATPilot.exe, vérifie son
+  empreinte, ferme le logiciel, remplace l'exécutable et le relance (le poste
+  n'est pas éteint pendant ce redémarrage).
+- Vérification automatique au démarrage (désactivable) ; un « ● » sur le menu
+  signale une nouvelle version.
+- Chaque changement du numéro de version publie automatiquement une
+  « Release » sur GitHub. Le dépôt doit être **public** pour que les
+  exécutables déjà installés puissent la télécharger.
 
 ### Icom IC-705
 - Choisir « Icom IC-705 », le port COM du câble USB, vitesse **115200**.

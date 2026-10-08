@@ -5,6 +5,8 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -16,3 +18,17 @@ jobs:
         with:
           name: CATPilot-windows
           path: dist/CATPilot.exe
+      # Publie une « Release » vX.Y.Z quand le numéro de version change :
+      # c'est elle que le menu « Mise à jour » du logiciel consulte.
+      - name: Publier la version
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER=$(python -c "import re;print(re.search(r'\"(.+?)\"', open('catpilot/__init__.py').read()).group(1))")
+          if gh release view "v$VER" > /dev/null 2>&1; then
+            echo "La version v$VER est déjà publiée"
+          else
+            gh release create "v$VER" dist/CATPilot.exe --title "CAT Pilot $VER" --notes-file NOTES.md
+          fi
