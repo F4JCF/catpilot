@@ -1,4 +1,4 @@
-# CAT Pilot 0.9 — Yaesu FT-991A, FT-891 et Icom IC-705
+# CAT Pilot 0.10 — Yaesu FT-991A, FT-891 et Icom IC-705
 
 Logiciel de pilotage CAT des Yaesu FT-991A, FT-891 et de l'Icom IC-705 sous Windows, avec partage du CAT
 vers WSJT-X, JTDX, Log4OM, N1MM… grâce à un serveur compatible rigctld.
@@ -128,6 +128,34 @@ Le poste « Simulateur » permet de tout essayer sans radio.
   sa modulation sur l'USB, puis revient au mode d'origine.
 - Appel en boucle : « Répéter toutes les N s ». Échap ou Stop arrêtent tout.
 - Régler le niveau pour que l'ALC bouge à peine.
+
+### Spots (bouton « Spots »)
+- Onglets **POTA** (api.pota.app), **SOTA** (sota.org.uk) et **DX cluster**
+  (telnet, par défaut dxc.ve7cc.net:23, connexion avec votre indicatif).
+- Filtres par bande et par mode, « bandes de mon poste » ; distance et cap
+  depuis votre locator quand le spot en donne un. Les indicatifs déjà
+  contactés sont grisés.
+- **Double-clic** : le poste s'accorde (fréquence et mode) et le QSO est
+  préparé dans le carnet avec la référence du parc ou du sommet.
+
+### Carnet de trafic (bouton « Carnet », Ctrl+L)
+- Saisie rapide : indicatif (Entrée = recherche HamQTH : nom, QTH, locator,
+  distance et cap), RST préremplis selon le mode, fréquence et heure UTC prises
+  sur le poste, références POTA/SOTA (la sienne et la vôtre en activation).
+- « Déjà contacté » s'affiche dès la saisie de l'indicatif.
+- Import et export ADIF, et **export de l'activation du jour** au nom de
+  fichier attendu par POTA (INDICATIF@REF-DATE.adi).
+- Le carnet est enregistré dans Documents\CATPilot\carnet.sqlite.
+- Réglages (menu Carnet) : votre indicatif et votre compte HamQTH (gratuit).
+
+### Liaison WSJT-X (bouton « WSJT-X »)
+- Dans WSJT-X : Paramètres > Rapports > Serveur UDP 127.0.0.1, port 2237,
+  cocher « Accepter les requêtes UDP ». Puis « Écouter WSJT-X » dans CAT Pilot.
+- Liste des stations entendues (SNR, locator, distance) ; en vert les CQ
+  d'indicatifs jamais contactés. Double-clic : WSJT-X appelle la station.
+- Les QSO journalisés dans WSJT-X sont inscrits au carnet (sans doublon).
+- Si JTAlert ou GridTracker écoutent déjà WSJT-X, utilisez l'adresse
+  multicast 224.0.0.1 dans WSJT-X et dans CAT Pilot.
 
 ### Mise à jour (menu « Mise à jour », à côté de « Aide »)
 - « Vérifier les mises à jour… » consulte la dernière version publiée sur

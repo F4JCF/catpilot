@@ -31,6 +31,9 @@ from .compact import CompactWindow
 from .geo import NmeaReader, from_locator, to_locator
 from .theme import THEMES, make_style
 from .voicekeyer import VoiceDock
+from .logbook import HamQTHDialog, Log, LogDock
+from .spots import SpotsDock, set_bands
+from .wsjtx import WsjtxDock
 
 # --- données ----------------------------------------------------------------
 MODE_BUTTONS = [("USB", "USB"), ("LSB", "LSB"), ("CW", "CW"), ("CWR", "CW-R"),
@@ -83,6 +86,7 @@ DEFAULT_PROFILES = {
 AMBER, GREEN, RED, TEXT = "#f2b705", "#8cff3a", "#e5463b", "#e6e6e6"
 ARC_OK, NEEDLE, METER_BG = "#2fbf3a", "#ff4d2e", "#000"
 STYLE = make_style("jour", 1.0)
+set_bands(BANDS)
 
 
 def apply_theme(app, name="jour", scale=1.0):
@@ -228,6 +232,10 @@ class MainWindow(QMainWindow):
         self.band_mem = json.loads(self.settings.value("band_mem", "{}"))
         self.toggles, self.sliders, self.combos = {}, {}, {}
         self.extra_toggles = []
+        self.log = Log()
+        self._worked = set()
+        self.log.changed.connect(self._reload_worked)
+        self._reload_worked()
         self._want_backup = False
         self._want_restore = False
         self.controls = []
@@ -254,7 +262,11 @@ class MainWindow(QMainWindow):
         self.cw = CwDock(self)
         self.txa = TxAudioDock(self)
         self.dvk = VoiceDock(self)
-        for dock, btn in ((self.cw, self.b_cw), (self.dvk, self.b_dvk), (self.txa, self.b_txa)):
+        self.spots = SpotsDock(self)
+        self.logdock = LogDock(self, self.log)
+        self.wsjtx = WsjtxDock(self, self.log)
+        for dock, btn in ((self.cw, self.b_cw), (self.dvk, self.b_dvk), (self.txa, self.b_txa),
+                          (self.spots, self.b_spots), (self.logdock, self.b_log), (self.wsjtx, self.b_wsjtx)):
             self.addDockWidget(Qt.RightDockWidgetArea, dock)
             self.tabifyDockWidget(self.mem, dock)
             dock.hide()
@@ -642,8 +654,14 @@ class MainWindow(QMainWindow):
         self.b_txa.setCheckable(True)
         self.b_dvk = QPushButton("Messages vocaux")
         self.b_dvk.setCheckable(True)
-        for b in (self.b_mems, self.b_cw, self.b_dvk, self.b_txa):
-            ll.addWidget(b)
+        self.b_spots = QPushButton("Spots")
+        self.b_spots.setCheckable(True)
+        self.b_log = QPushButton("Carnet")
+        self.b_log.setCheckable(True)
+        self.b_wsjtx = QPushButton("WSJT-X")
+        self.b_wsjtx.setCheckable(True)
+        self.dock_buttons = (self.b_spots, self.b_log, self.b_wsjtx, self.b_mems, self.b_cw,
+                             self.b_dvk, self.b_txa)
         lv.addLayout(ll)
         lo = QHBoxLayout()
         self.ck_auto = QCheckBox("Se connecter au lancement du logiciel")
@@ -654,6 +672,8 @@ class MainWindow(QMainWindow):
             lo.addWidget(w)
             lo.addSpacing(16)
         lo.addStretch()
+        for b in self.dock_buttons:
+            lo.addWidget(b)
         lv.addLayout(lo)
         pl.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         g.addWidget(pl, 3, 0, 1, 4)
@@ -716,6 +736,9 @@ class MainWindow(QMainWindow):
         self.mem.scanning = False
         self.cw.save_settings(s)
         self.dvk.save_settings(s)
+        self.spots.save_settings(s)
+        self.logdock.save_settings(s)
+        self.wsjtx.save_settings(s)
         s.setValue("oob_cut", "true" if self.act_oob.isChecked() else "false")
         s.setValue("night", "true" if self.act_night.isChecked() else "false")
         s.setValue("text_scale", self.text_scale())
@@ -980,8 +1003,10 @@ class MainWindow(QMainWindow):
             a.triggered.connect(slot)
             m.addAction(a)
         aff = mb.addMenu("Affichage")
-        for label, btn in (("Mémoires et scan", self.b_mems), ("CW au clavier", self.b_cw),
-                           ("Messages vocaux", self.b_dvk), ("Audio d'émission", self.b_txa)):
+        for label, btn in (("Spots POTA, SOTA et DX", self.b_spots), ("Carnet de trafic", self.b_log),
+                           ("WSJT-X", self.b_wsjtx), ("Mémoires et scan", self.b_mems),
+                           ("CW au clavier", self.b_cw), ("Messages vocaux", self.b_dvk),
+                           ("Audio d'émission", self.b_txa)):
             a = QAction(label, self)
             a.triggered.connect(lambda _c=False, b=btn: b.setChecked(True))
             aff.addAction(a)
@@ -1013,6 +1038,19 @@ class MainWindow(QMainWindow):
             a.triggered.connect(lambda _c=False: self.apply_look())
             self.size_group.addAction(a)
             sizes.addAction(a)
+        cm = mb.addMenu("Carnet")
+        for label, slot in (("Ouvrir le carnet", lambda: self.b_log.setChecked(True)),
+                            ("Importer un fichier ADIF…", lambda: self.logdock.import_adif()),
+                            ("Exporter tout le carnet en ADIF…", lambda: self.logdock.export_adif()),
+                            ("Exporter l'activation du jour (POTA/SOTA)…", lambda: self.logdock.export_activation()),
+                            (None, None),
+                            ("Réglages : indicatif et HamQTH…", self.log_settings)):
+            if label is None:
+                cm.addSeparator()
+                continue
+            a = QAction(label, self)
+            a.triggered.connect(slot)
+            cm.addAction(a)
         h = mb.addMenu("Aide")
         a = QAction("Raccourcis clavier", self)
         a.triggered.connect(self.show_shortcuts)
@@ -1060,6 +1098,7 @@ class MainWindow(QMainWindow):
             sc(f"Alt+F{i + 1}", lambda n=i: self.cw.send(self.cw.macros[n].text()))
         for i in range(4):
             sc(f"Ctrl+F{i + 1}", lambda n=i: self.dvk.send(n))
+        sc("Ctrl+L", self.focus_log)
 
     def show_shortcuts(self):
         QMessageBox.information(self, "Raccourcis clavier", (
@@ -1072,6 +1111,7 @@ class MainWindow(QMainWindow):
             "Alt + F1 à F5 : messages CW programmables\n"
             "Ctrl + F1 à F4 : messages vocaux\n"
             "Ctrl + K : mode compact,  Ctrl + N : mode nuit\n"
+            "Ctrl + L : saisir un QSO dans le carnet\n"
             "Échap : arrêter le scan et la CW\n\n"
             "Molette sur un chiffre de la fréquence : régler ce chiffre.\n"
             "Bouton d'accord USB (ShuttleXpress, PowerMate…) : programmez-le dans son "
@@ -1286,6 +1326,41 @@ class MainWindow(QMainWindow):
         if not getattr(drv, "has_usb_audio", True):
             self.cb_audio.setToolTip("Ce poste n'a pas de carte son USB : choisissez l'entrée de votre "
                                      "interface audio (SCU-17, Signalink…)")
+
+    # --- carnet, spots, rotor -----------------------------------------------------------------
+    def _reload_worked(self):
+        with self.log.lock:
+            self._worked = {r[0] for r in self.log.db.execute("SELECT DISTINCT call FROM qso")}
+
+    def worked_before(self, call):
+        return call.upper() in self._worked
+
+    def prefill_log(self, call, ref="", mode=None):
+        self.b_log.setChecked(True)
+        self.logdock.prefill(call, ref, mode)
+
+    def focus_log(self):
+        self.b_log.setChecked(True)
+        self.logdock.raise_()
+        self.logdock.ed_call.setFocus()
+
+    def log_settings(self):
+        d = HamQTHDialog(self)
+        if d.exec() != QDialog.Accepted:
+            return
+        s = self.settings
+        s.setValue("mycall", d.ed_call.text().strip().upper())
+        s.setValue("hamqth_user", d.ed_user.text().strip())
+        s.setValue("hamqth_pass", d.ed_pass.text())
+        self.logdock.hamqth.user = d.ed_user.text().strip()
+        self.logdock.hamqth.password = d.ed_pass.text()
+        self.logdock.hamqth.session = None
+        self.cw.ed_mycall.setText(d.ed_call.text().strip().upper())
+
+    def point_rotor_to_grid(self, grid):
+        rot = getattr(self, "rotor", None)
+        if rot and rot.follow_spots():
+            rot.point_to_grid(grid)
 
     # --- apparence -------------------------------------------------------------------------
     def text_scale(self):
