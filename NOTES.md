@@ -1,7 +1,6 @@
-Nouveautés de la 0.14.0 :
-- Carnet de trafic : la fiche de l'indicatif se cherche toute seule pendant la frappe (plus besoin d'appuyer sur Entrée).
-- Nouvelle source QRZ.com (compte à saisir dans Carnet > Réglages), en plus de HamQTH.com.
-- Sans compte : pays, zones CQ et ITU trouvés d'après le préfixe, et indicatifs américains via callook.info.
-- Les sites sont interrogés l'un après l'autre et se complètent.
-- Boutons « QRZ.com » et « HamQTH » pour ouvrir la fiche de l'indicatif dans le navigateur.
-- Si l'indicatif est corrigé, les champs remplis automatiquement sont remplacés par la bonne fiche.
+Nouveautés de la 0.15.0 :
+- Décodeur CW : dans le panneau « CW au clavier », bouton « Décoder ». Le morse reçu sur l'audio USB du poste s'affiche en texte.
+- La note CW est trouvée toute seule (case « Note auto »), ou prise sur la tonalité CW du poste. Un repère orange « CW » la montre sur la chute d'eau.
+- La vitesse (mots/min) et le seuil s'adaptent tout seuls ; le niveau du signal est affiché.
+- Double-clic sur un indicatif reçu : il passe dans « Correspondant » et dans le carnet de trafic, qui cherche sa fiche.
+- Le signal de test (sans poste) contient maintenant un appel CW à 900 Hz pour essayer le décodeur.

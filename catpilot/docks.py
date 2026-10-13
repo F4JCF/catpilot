@@ -4,13 +4,15 @@ import json
 import os
 
 import serial.tools.list_ports
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
-    QAbstractItemView, QComboBox, QDialog, QDockWidget, QGridLayout, QHBoxLayout, QHeaderView,
+    QAbstractItemView, QCheckBox, QComboBox, QPlainTextEdit, QProgressBar, QDialog, QDockWidget, QGridLayout, QHBoxLayout, QHeaderView,
     QLabel, QLineEdit, QMessageBox, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout,
     QWidget,
 )
 
+from .cwdecoder import CwDecoder
 from .cwkeyer import LineKeyer, duration, normalize
 from .memdock import MODIFIED, backup_dir
 
@@ -27,6 +29,17 @@ def _dock_widget(dock):
     v = QVBoxLayout(w)
     dock.setWidget(w)
     return v
+
+
+class DecodedText(QPlainTextEdit):
+    """Texte reçu ; un double-clic sur un mot le propose comme indicatif du correspondant."""
+    word = Signal(str)
+
+    def mouseDoubleClickEvent(self, e):
+        super().mouseDoubleClickEvent(e)
+        w = self.textCursor().selectedText().strip().upper()
+        if w:
+            self.word.emit(w)
 
 
 # --- CW au clavier ------------------------------------------------------------------------
@@ -116,10 +129,106 @@ class CwDock(QDockWidget):
         self.lb.setObjectName("value")
         self.lb.setWordWrap(True)
         v.addWidget(self.lb)
-        v.addStretch()
+
+        # --- réception : décodeur CW ---
+        t = QLabel("Réception : décodeur CW (audio USB du poste, comme la chute d'eau)")
+        t.setObjectName("hint")
+        v.addWidget(t)
+        self.decoder = CwDecoder()
+        h = QHBoxLayout()
+        self.b_dec = QPushButton("Décoder")
+        self.b_dec.setCheckable(True)
+        self.b_dec.setToolTip("Décoder le morse reçu. Lance la chute d'eau si besoin.")
+        self.b_dec.toggled.connect(self.toggle_decoder)
+        h.addWidget(self.b_dec)
+        self.ck_auto = QCheckBox("Note auto")
+        self.ck_auto.setToolTip("Coché : suit le signal CW le plus fort (300 à 1500 Hz).\n"
+                                "Décoché : décode sur la tonalité CW du poste (PITCH) ;\n"
+                                "un clic sur un signal dans la chute d'eau l'y amène.")
+        self.ck_auto.setChecked(s.value("cwdec_auto", "true") in (True, "true"))
+        self.ck_auto.toggled.connect(lambda on: setattr(self.decoder, "auto", on))
+        self.decoder.auto = self.ck_auto.isChecked()
+        h.addWidget(self.ck_auto)
+        self.bar = QProgressBar()
+        self.bar.setRange(0, 100)
+        self.bar.setTextVisible(False)
+        self.bar.setMaximumHeight(10)
+        self.bar.setMaximumWidth(70)
+        self.bar.setToolTip("Signal décodé (le seuil s'adapte tout seul)")
+        h.addWidget(self.bar)
+        self.lb_dec = QLabel("")
+        self.lb_dec.setObjectName("value")
+        h.addWidget(self.lb_dec, 1)
+        b = QPushButton("Effacer")
+        b.clicked.connect(lambda: self.rx.clear())
+        h.addWidget(b)
+        v.addLayout(h)
+        self.rx = DecodedText()
+        self.rx.setReadOnly(True)
+        self.rx.setMaximumBlockCount(500)
+        self.rx.setMinimumHeight(70)
+        self.rx.setPlaceholderText("Le texte reçu s'affiche ici. Double-clic sur un indicatif : "
+                                   "il passe dans Correspondant et dans le carnet.")
+        self.rx.word.connect(self.use_word)
+        v.addWidget(self.rx, 1)
+        self.dec_timer = QTimer(self)
+        self.dec_timer.timeout.connect(self._dec_status)
         self._method_changed()
 
+    # --- décodeur ---------------------------------------------------------------------
+    def toggle_decoder(self, on):
+        wf = self.win.wf
+        if on:
+            if not wf.running:
+                self.win.b_wf.setChecked(True)
+                if not wf.running:             # pas d'audio : on renonce
+                    self.b_dec.blockSignals(True)
+                    self.b_dec.setChecked(False)
+                    self.b_dec.blockSignals(False)
+                    self.lb_dec.setText("Choisissez l'entrée audio du poste (chute d'eau)")
+                    return
+            self.decoder.reset()
+            if self._feed not in wf.listeners:
+                wf.listeners.append(self._feed)
+            self.dec_timer.start(200)
+        else:
+            if self._feed in wf.listeners:
+                wf.listeners.remove(self._feed)
+            self.dec_timer.stop()
+            wf.cw_marker = None
+            self.bar.setValue(0)
+            self.lb_dec.setText("")
+
+    def _feed(self, x, sr):
+        self.decoder.pitch = float(self.win.wf.marker or 700)
+        txt = self.decoder.feed(x, sr)
+        if txt:
+            self.rx.moveCursor(QTextCursor.End)
+            self.rx.insertPlainText(txt)
+            self.rx.moveCursor(QTextCursor.End)
+
+    def _dec_status(self):
+        d = self.decoder
+        f = d.freq if d.auto else d.pitch
+        self.win.wf.cw_marker = f
+        ok = d.snr >= 9
+        self.bar.setValue(int(d.level * 100) if ok and d.key else 0)
+        self.lb_dec.setText(f"{f:.0f} Hz · {d.wpm} mots/min · {d.snr:.0f} dB" if ok
+                            else f"{f:.0f} Hz · pas de signal CW")
+
+    def use_word(self, w):
+        import re
+        w = w.strip(".,?=")
+        if not re.match(r"^([A-Z0-9]{1,4}/)?[A-Z0-9]{1,3}\d[A-Z]{1,4}(/[A-Z0-9]{1,4})?$", w):
+            return
+        self.ed_call.setText(w)
+        log = getattr(self.win, "logdock", None)
+        if log:
+            log.ed_call.setText(w)
+            log.on_call_edit(w)
+
     def save_settings(self, s):
+        s.setValue("cwdec_auto", self.ck_auto.isChecked())
         s.setValue("cw_method", self.cb_method.currentIndex())
         s.setValue("cw_port", self.cb_kport.currentData() or "")
         s.setValue("mycall", self.ed_mycall.text())

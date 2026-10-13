@@ -985,6 +985,7 @@ class MainWindow(QMainWindow):
         else:
             self.wf.stop()
             self._uncheck(self.b_rec)
+            self.cw.b_dec.setChecked(False)
         self.cb_audio.setEnabled(not on)
 
     def on_wf_hover(self, audio_hz):

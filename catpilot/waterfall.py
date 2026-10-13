@@ -94,6 +94,10 @@ class Waterfall(QWidget):
         self.floor = None
         self.message = "Chute d'eau arrêtée"
         self.marker = None            # fréquence audio où un clic amène le signal
+        self.cw_marker = None         # note suivie par le décodeur CW
+        self.listeners = []           # fonctions(échantillons, fréquence d'échantillonnage)
+        from .cwdecoder import CwGenerator
+        self._cwgen = CwGenerator("CQ CQ CQ DE F4JCF F4JCF K", wpm=20, freq=900.0, amp=0.12)
         self.rec = None               # fichier WAV en cours d'enregistrement
         self.rec_path = ""
         self.rec_start = 0.0
@@ -169,6 +173,7 @@ class Waterfall(QWidget):
             if (self._t // period) % 2 == (0 if f != 1180 else 1):
                 fm = f + 6.25 * ((t * 6.25).astype(int) % 8)        # 8 tonalités
                 x += a * np.sin(2 * math.pi * fm * t).astype(np.float32)
+        x += self._cwgen.samples(t)                                  # un appel CW à 900 Hz
         self._t += n / self.sr
         return x
 
@@ -181,6 +186,13 @@ class Waterfall(QWidget):
             new.append(self.chunks.popleft())
         if not new:
             return
+        if self.listeners:
+            block = np.concatenate(new)
+            for fn in list(self.listeners):
+                try:
+                    fn(block, self.sr)
+                except Exception:
+                    pass
         if self.rec:
             for chunk in new:
                 self.rec.writeframes((np.clip(chunk, -1, 1) * 32767).astype("<i2").tobytes())
@@ -221,6 +233,11 @@ class Waterfall(QWidget):
             x = r.width() * self.marker / self.FMAX
             p.setPen(QPen(QColor(255, 255, 255, 110), 1, Qt.DashLine))
             p.drawLine(int(x), 18, int(x), int(r.height()))
+        if self.cw_marker:
+            x = r.width() * self.cw_marker / self.FMAX
+            p.setPen(QPen(QColor(255, 160, 40, 200), 2))
+            p.drawLine(int(x), 18, int(x), 34)
+            p.drawText(QRectF(x + 3, 18, 40, 14), Qt.AlignLeft | Qt.AlignVCenter, "CW")
         if self.message:
             p.setPen(QColor("#9a9a9a"))
             p.drawText(r, Qt.AlignCenter, self.message)

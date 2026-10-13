@@ -235,6 +235,15 @@ EXACT = {
     "Indicatif manquant": "Callsign missing", "Importer un fichier ADIF": "Import an ADIF file",
     "Exporter en ADIF": "Export to ADIF", "Import ADIF": "ADIF import", "Activation": "Activation",
     "Indiquez votre référence dans « Ma réf. (activation) ».": "Enter your reference in \"My ref. (activation)\".",
+    "Réception : décodeur CW (audio USB du poste, comme la chute d'eau)": "Receive: CW decoder (radio USB audio, like the waterfall)",
+    "Décoder": "Decode", "Note auto": "Auto tone",
+    "Décoder le morse reçu. Lance la chute d'eau si besoin.": "Decode received Morse. Starts the waterfall if needed.",
+    "Coché : suit le signal CW le plus fort (300 à 1500 Hz).\nDécoché : décode sur la tonalité CW du poste (PITCH) ;\nun clic sur un signal dans la chute d'eau l'y amène.":
+        "Checked: follows the strongest CW signal (300 to 1500 Hz).\nUnchecked: decodes on the radio's CW pitch;\nclicking a signal in the waterfall brings it there.",
+    "Signal décodé (le seuil s'adapte tout seul)": "Decoded signal (the threshold adapts by itself)",
+    "Le texte reçu s'affiche ici. Double-clic sur un indicatif : il passe dans Correspondant et dans le carnet.":
+        "Received text shows here. Double-click a callsign to put it in Other station and in the log.",
+    "Choisissez l'entrée audio du poste (chute d'eau)": "Choose the radio's audio input (waterfall)",
     "Compte QRZ.com": "QRZ.com account", "Mot de passe QRZ.com": "QRZ.com password",
     "Ouvrir la fiche de l'indicatif sur QRZ.com": "Open the callsign page on QRZ.com",
     "Ouvrir la fiche de l'indicatif sur HamQTH.com": "Open the callsign page on HamQTH.com",
@@ -414,6 +423,7 @@ TEMPLATES = {
     "{} QSO exportés dans {}": "{} QSOs exported to {}", "Supprimer {} QSO du carnet ?": "Delete {} QSO(s) from the log?",
     "Aucun QSO aujourd'hui (UTC) depuis {}.": "No QSO today (UTC) from {}.", "HamQTH injoignable : {}": "HamQTH unreachable: {}",
     "HamQTH : {}": "HamQTH: {}", "Déjà contacté {} fois : {}": "Already worked {} times: {}", "{} trouvé": "{} found",
+    "{} Hz · {} mots/min · {} dB": "{} Hz · {} WPM · {} dB", "{} Hz · pas de signal CW": "{} Hz · no CW signal",
     "{} : {}": "{}: {}", "Appel de {} demandé à WSJT-X": "WSJT-X asked to call {}", "Port UDP {} indisponible : {}": "UDP port {} unavailable: {}",
     "QSO WSJT-X avec {} inscrit au carnet": "WSJT-X QSO with {} added to the log", "WSJT-X : {} sur {} MHz": "WSJT-X: {} on {} MHz",
     "WSJT-X : {} sur {} MHz — émission": "WSJT-X: {} on {} MHz — transmitting",
