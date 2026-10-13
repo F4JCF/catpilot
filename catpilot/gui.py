@@ -1122,7 +1122,7 @@ class MainWindow(QMainWindow):
                             ("Exporter tout le carnet en ADIF…", lambda: self.logdock.export_adif()),
                             ("Exporter l'activation du jour (POTA/SOTA)…", lambda: self.logdock.export_activation()),
                             (None, None),
-                            ("Réglages : indicatif et HamQTH…", self.log_settings)):
+                            ("Réglages : indicatif, QRZ.com et HamQTH…", self.log_settings)):
             if label is None:
                 cm.addSeparator()
                 continue
@@ -1437,6 +1437,12 @@ class MainWindow(QMainWindow):
         self.logdock.hamqth.user = d.ed_user.text().strip()
         self.logdock.hamqth.password = d.ed_pass.text()
         self.logdock.hamqth.session = None
+        s.setValue("qrz_user", d.ed_qrz_user.text().strip())
+        s.setValue("qrz_pass", d.ed_qrz_pass.text())
+        self.logdock.hamqth.qrz_user = d.ed_qrz_user.text().strip()
+        self.logdock.hamqth.qrz_password = d.ed_qrz_pass.text()
+        self.logdock.hamqth.qrz_session = None
+        self.logdock.hamqth.cache.clear()
         self.cw.ed_mycall.setText(d.ed_call.text().strip().upper())
 
     def point_rotor_to_grid(self, grid):

@@ -32,6 +32,7 @@ EXACT = {
     "Exporter tout le carnet en ADIF…": "Export the whole log to ADIF…",
     "Exporter l'activation du jour (POTA/SOTA)…": "Export today's activation (POTA/SOTA)…",
     "Réglages : indicatif et HamQTH…": "Settings: callsign and HamQTH…",
+    "Réglages : indicatif, QRZ.com et HamQTH…": "Settings: callsign, QRZ.com and HamQTH…",
     "Raccourcis clavier": "Keyboard shortcuts", "À propos de CAT Pilot": "About CAT Pilot",
     "Vérifier les mises à jour…": "Check for updates…", "Vérifier au démarrage": "Check at startup",
     "Voir toutes les versions sur GitHub": "See all versions on GitHub",
@@ -234,6 +235,12 @@ EXACT = {
     "Indicatif manquant": "Callsign missing", "Importer un fichier ADIF": "Import an ADIF file",
     "Exporter en ADIF": "Export to ADIF", "Import ADIF": "ADIF import", "Activation": "Activation",
     "Indiquez votre référence dans « Ma réf. (activation) ».": "Enter your reference in \"My ref. (activation)\".",
+    "Compte QRZ.com": "QRZ.com account", "Mot de passe QRZ.com": "QRZ.com password",
+    "Ouvrir la fiche de l'indicatif sur QRZ.com": "Open the callsign page on QRZ.com",
+    "Ouvrir la fiche de l'indicatif sur HamQTH.com": "Open the callsign page on HamQTH.com",
+    "Les deux comptes sont facultatifs. HamQTH.com est gratuit et donne nom, QTH et locator. QRZ.com donne la fiche complète avec un abonnement XML, et seulement une partie sans. Sans compte, CAT Pilot trouve quand même le pays et les zones, et les indicatifs américains via callook.info. Les mots de passe sont enregistrés sur ce PC.":
+        "Both accounts are optional. HamQTH.com is free and gives name, QTH and locator. QRZ.com gives the full record with an XML subscription, and only part of it without. Without an account, CAT Pilot still finds the country and zones, and US callsigns via callook.info. Passwords are stored on this PC.",
+    "Indicatif inconnu": "Unknown callsign",
     "Réglages du carnet": "Log settings", "Compte HamQTH": "HamQTH account", "Mot de passe HamQTH": "HamQTH password",
     "Compte gratuit sur hamqth.com. Le mot de passe est enregistré sur ce PC.":
         "Free account on hamqth.com. The password is stored on this PC.",

@@ -1,6 +1,7 @@
 """Carnet de trafic : base SQLite, recherche HamQTH, import/export ADIF."""
 import datetime
 import os
+import re
 import sqlite3
 import threading
 import urllib.parse
@@ -119,16 +120,23 @@ class Log(QObject):
 
 
 class HamQTH(QObject):
-    """Recherche d'indicatif sur HamQTH.com (compte gratuit nécessaire)."""
+    """Recherche d'indicatif sur plusieurs sites, dans l'ordre :
+    QRZ.com (si compte), HamQTH.com (si compte), callook.info (indicatifs US, sans compte),
+    puis pays et zones déduits du préfixe (sans Internet).
+    Les champs manquants d'une source sont complétés par la suivante."""
     result = Signal(str, object)          # indicatif, dict ou message d'erreur (str)
 
     URL = "https://www.hamqth.com/xml.php"
     NS = "{https://www.hamqth.com}"
+    QRZ_URL = "https://xmldata.qrz.com/xml/current/"
+    KEYS = ("name", "qth", "country", "grid", "itu", "cq", "lat", "lon")
 
     def __init__(self):
         super().__init__()
         self.user = self.password = ""
+        self.qrz_user = self.qrz_password = ""
         self.session = None
+        self.qrz_session = None
         self.cache = {}
 
     def lookup(self, call):
@@ -140,46 +148,231 @@ class HamQTH(QObject):
             return
         threading.Thread(target=self._lookup, args=(call,), daemon=True).start()
 
-    def _get(self, params):
-        url = self.URL + "?" + urllib.parse.urlencode(params)
+    def _open(self, url):
         req = urllib.request.Request(url, headers={"User-Agent": f"CATPilot/{__version__}"})
         with urllib.request.urlopen(req, timeout=10) as r:
-            return ET.fromstring(r.read())
+            return r.read()
+
+    def _get(self, params):
+        return ET.fromstring(self._open(self.URL + "?" + urllib.parse.urlencode(params)))
+
+    @staticmethod
+    def _find(root, tag):
+        for el in root.iter():
+            if el.tag.split("}")[-1] == tag:
+                return (el.text or "").strip()
+        return ""
 
     def _text(self, root, tag):
-        el = root.find(f".//{self.NS}{tag}")
-        if el is None:
-            el = root.find(f".//{tag}")
-        return (el.text or "").strip() if el is not None else ""
+        return self._find(root, tag)
+
+    # --- sources -----------------------------------------------------------------------
+    def _qrz(self, call):
+        if not self.qrz_user or not self.qrz_password:
+            return None, None
+        for attempt in range(2):
+            if not self.qrz_session:
+                root = ET.fromstring(self._open(self.QRZ_URL + "?" + urllib.parse.urlencode(
+                    {"username": self.qrz_user, "password": self.qrz_password,
+                     "agent": f"CATPilot{__version__}"})))
+                self.qrz_session = self._find(root, "Key") or None
+                if not self.qrz_session:
+                    return None, "QRZ.com : " + (self._find(root, "Error") or "connexion refusée")
+            root = ET.fromstring(self._open(self.QRZ_URL + "?" + urllib.parse.urlencode(
+                {"s": self.qrz_session, "callsign": call})))
+            err = self._find(root, "Error")
+            if not self._find(root, "call"):
+                if err and "session" in err.lower() and attempt == 0:
+                    self.qrz_session = None
+                    continue
+                return None, (f"QRZ.com : {err}" if err and "not found" not in err.lower() else None)
+            f = lambda t: self._find(root, t)
+            qth = ", ".join(x for x in (f("addr2"), f("state")) if x)
+            return {"name": (f("nickname") or f("fname")).split(" ")[0].title(),
+                    "qth": qth, "country": f("country"), "grid": f("grid"), "itu": f("ituzone"),
+                    "cq": f("cqzone"), "lat": f("lat"), "lon": f("lon"), "src": "QRZ.com"}, None
+        return None, None
+
+    def _hamqth(self, call):
+        if not self.user or not self.password:
+            return None, None
+        for attempt in range(2):
+            if not self.session:
+                root = self._get({"u": self.user, "p": self.password})
+                self.session = self._text(root, "session_id") or None
+                if not self.session:
+                    return None, "HamQTH : " + (self._text(root, "error") or "connexion refusée")
+            root = self._get({"id": self.session, "callsign": call, "prg": "CATPilot"})
+            err = self._text(root, "error")
+            if err and "session" in err.lower() and attempt == 0:
+                self.session = None
+                continue
+            if err:
+                return None, (None if "not found" in err.lower() else f"HamQTH : {err}")
+            info = {k: self._text(root, k) for k in
+                    ("nick", "adr_name", "qth", "country", "grid", "itu", "cq", "lat", "lon")}
+            info["name"] = info.pop("nick") or info.pop("adr_name", "").split(" ")[0]
+            info.pop("adr_name", None)
+            info["src"] = "HamQTH"
+            return info, None
+        return None, None
+
+    def _callook(self, call):
+        if not re.match(r"^(A[A-L]|[KNW])[A-Z]?\d[A-Z]{1,3}$", call.split("/")[0]):
+            return None, None
+        import json
+        d = json.loads(self._open(f"https://callook.info/{urllib.parse.quote(call.split('/')[0])}/json"))
+        if d.get("status") != "VALID":
+            return None, None
+        loc, adr = d.get("location") or {}, d.get("address") or {}
+        name = (d.get("name") or "").title()
+        return {"name": name.split(" ")[0] if name else "", "qth": (adr.get("line2") or "").title(),
+                "country": "États-Unis", "grid": loc.get("gridsquare", ""),
+                "lat": loc.get("latitude", ""), "lon": loc.get("longitude", ""), "src": "callook.info"}, None
 
     def _lookup(self, call):
-        if not self.user or not self.password:
-            self.result.emit(call, "Indiquez votre compte HamQTH (menu Carnet > Réglages)")
+        info, errors, sources = {}, [], []
+        for fn in (self._qrz, self._hamqth, self._callook):
+            try:
+                got, err = fn(call)
+            except Exception as e:
+                got, err = None, f"{fn.__name__.strip('_')} injoignable : {e}"
+            if err:
+                errors.append(err)
+            if got:
+                sources.append(got.pop("src", ""))
+                for k, v in got.items():
+                    if v and not info.get(k):
+                        info[k] = v
+            if all(info.get(k) for k in ("name", "qth", "grid")):
+                break
+        pre = prefix_info(call)
+        if pre:
+            for k in ("country", "cq", "itu"):
+                if pre.get(k) and not info.get(k):
+                    info[k] = pre[k]
+        if not info:
+            self.result.emit(call, " ; ".join(errors) or "Indicatif inconnu")
             return
-        try:
-            for attempt in range(2):
-                if not self.session:
-                    root = self._get({"u": self.user, "p": self.password})
-                    self.session = self._text(root, "session_id") or None
-                    if not self.session:
-                        self.result.emit(call, "HamQTH : " + (self._text(root, "error") or "connexion refusée"))
-                        return
-                root = self._get({"id": self.session, "callsign": call, "prg": "CATPilot"})
-                err = self._text(root, "error")
-                if err and "session" in err.lower() and attempt == 0:
-                    self.session = None
-                    continue
-                if err:
-                    self.result.emit(call, f"HamQTH : {err}")
-                    return
-                info = {k: self._text(root, k) for k in
-                        ("nick", "adr_name", "qth", "country", "grid", "itu", "cq", "lat", "lon")}
-                info["name"] = info["nick"] or info["adr_name"].split(" ")[0]
-                self.cache[call] = info
-                self.result.emit(call, info)
-                return
-        except Exception as e:
-            self.result.emit(call, f"HamQTH injoignable : {e}")
+        info["sources"] = ", ".join(s for s in sources if s) or "préfixe"
+        if not sources and not self.qrz_user and not self.user:
+            info["hint"] = "pour le nom et le QTH, ajoutez un compte QRZ.com ou HamQTH (Carnet > Réglages)"
+        if errors and not sources:
+            info["hint"] = " ; ".join(errors)
+        if sources:
+            self.cache[call] = info
+        self.result.emit(call, info)
+
+
+# Préfixe -> (pays, zone CQ, zone ITU). Les plus longs sont testés en premier.
+PREFIXES = {
+    "F": ("France", 14, 27), "TK": ("Corse", 15, 28), "FR": ("La Réunion", 39, 53),
+    "FM": ("Martinique", 8, 11), "FG": ("Guadeloupe", 8, 11), "FY": ("Guyane", 9, 12),
+    "FK": ("Nouvelle-Calédonie", 32, 56), "FO": ("Polynésie française", 32, 63),
+    "FH": ("Mayotte", 39, 53), "FP": ("Saint-Pierre-et-Miquelon", 5, 9), "FS": ("Saint-Martin", 8, 11),
+    "3A": ("Monaco", 14, 27), "ON": ("Belgique", 14, 27), "OO": ("Belgique", 14, 27),
+    "OR": ("Belgique", 14, 27), "OT": ("Belgique", 14, 27), "LX": ("Luxembourg", 14, 27),
+    "HB0": ("Liechtenstein", 14, 28), "HB": ("Suisse", 14, 28), "HE": ("Suisse", 14, 28),
+    "EA6": ("Baléares", 14, 37), "EA8": ("Canaries", 33, 36), "EA9": ("Ceuta et Melilla", 33, 37),
+    "EA": ("Espagne", 14, 37), "EB": ("Espagne", 14, 37), "EC": ("Espagne", 14, 37), "ED": ("Espagne", 14, 37),
+    "EE": ("Espagne", 14, 37), "EF": ("Espagne", 14, 37), "EG": ("Espagne", 14, 37), "EH": ("Espagne", 14, 37),
+    "C3": ("Andorre", 14, 27), "CT3": ("Madère", 33, 36), "CU": ("Açores", 14, 36), "CT": ("Portugal", 14, 37),
+    "CQ": ("Portugal", 14, 37), "CS": ("Portugal", 14, 37),
+    "IS0": ("Sardaigne", 15, 28), "IM0": ("Sardaigne", 15, 28), "IT9": ("Sicile", 15, 28),
+    "I": ("Italie", 15, 28), "T7": ("Saint-Marin", 15, 28), "HV": ("Vatican", 15, 28),
+    "9H": ("Malte", 15, 28), "DA": ("Allemagne", 14, 28), "DB": ("Allemagne", 14, 28),
+    "DC": ("Allemagne", 14, 28), "DD": ("Allemagne", 14, 28), "DF": ("Allemagne", 14, 28),
+    "DG": ("Allemagne", 14, 28), "DH": ("Allemagne", 14, 28), "DJ": ("Allemagne", 14, 28),
+    "DK": ("Allemagne", 14, 28), "DL": ("Allemagne", 14, 28), "DM": ("Allemagne", 14, 28),
+    "DO": ("Allemagne", 14, 28), "DP": ("Allemagne", 14, 28), "DQ": ("Allemagne", 14, 28),
+    "DR": ("Allemagne", 14, 28), "OE": ("Autriche", 15, 28), "PA": ("Pays-Bas", 14, 27),
+    "PB": ("Pays-Bas", 14, 27), "PC": ("Pays-Bas", 14, 27), "PD": ("Pays-Bas", 14, 27),
+    "PE": ("Pays-Bas", 14, 27), "PF": ("Pays-Bas", 14, 27), "PG": ("Pays-Bas", 14, 27),
+    "PH": ("Pays-Bas", 14, 27), "PI": ("Pays-Bas", 14, 27),
+    "G": ("Angleterre", 14, 27), "M": ("Angleterre", 14, 27), "2E": ("Angleterre", 14, 27),
+    "GM": ("Écosse", 14, 27), "MM": ("Écosse", 14, 27), "2M": ("Écosse", 14, 27),
+    "GW": ("Pays de Galles", 14, 27), "MW": ("Pays de Galles", 14, 27), "2W": ("Pays de Galles", 14, 27),
+    "GI": ("Irlande du Nord", 14, 27), "MI": ("Irlande du Nord", 14, 27), "2I": ("Irlande du Nord", 14, 27),
+    "GD": ("Île de Man", 14, 27), "MD": ("Île de Man", 14, 27), "GJ": ("Jersey", 14, 27),
+    "MJ": ("Jersey", 14, 27), "GU": ("Guernesey", 14, 27), "MU": ("Guernesey", 14, 27),
+    "EI": ("Irlande", 14, 27), "EJ": ("Irlande", 14, 27),
+    "OZ": ("Danemark", 14, 18), "OX": ("Groenland", 40, 5), "OY": ("Féroé", 14, 18),
+    "LA": ("Norvège", 14, 18), "LB": ("Norvège", 14, 18), "JW": ("Svalbard", 40, 18),
+    "SM": ("Suède", 14, 18), "SA": ("Suède", 14, 18), "SK": ("Suède", 14, 18), "7S": ("Suède", 14, 18),
+    "OH0": ("Åland", 15, 18), "OH": ("Finlande", 15, 18), "OG": ("Finlande", 15, 18), "TF": ("Islande", 40, 17),
+    "SP": ("Pologne", 15, 28), "SQ": ("Pologne", 15, 28), "SN": ("Pologne", 15, 28), "SO": ("Pologne", 15, 28),
+    "3Z": ("Pologne", 15, 28), "HF": ("Pologne", 15, 28),
+    "OK": ("Tchéquie", 15, 28), "OL": ("Tchéquie", 15, 28), "OM": ("Slovaquie", 15, 28),
+    "HA": ("Hongrie", 15, 28), "HG": ("Hongrie", 15, 28), "S5": ("Slovénie", 15, 28),
+    "9A": ("Croatie", 15, 28), "E7": ("Bosnie-Herzégovine", 15, 28), "YU": ("Serbie", 15, 28),
+    "4O": ("Monténégro", 15, 28), "Z3": ("Macédoine du Nord", 15, 28), "ZA": ("Albanie", 15, 28),
+    "YO": ("Roumanie", 20, 28), "YP": ("Roumanie", 20, 28), "YR": ("Roumanie", 20, 28),
+    "LZ": ("Bulgarie", 20, 28), "SV9": ("Crète", 20, 28), "SV": ("Grèce", 20, 28), "SX": ("Grèce", 20, 28),
+    "SY": ("Grèce", 20, 28), "SZ": ("Grèce", 20, 28), "J4": ("Grèce", 20, 28),
+    "5B": ("Chypre", 20, 39), "C4": ("Chypre", 20, 39), "P3": ("Chypre", 20, 39),
+    "TA": ("Turquie", 20, 39), "TB": ("Turquie", 20, 39), "TC": ("Turquie", 20, 39), "YM": ("Turquie", 20, 39),
+    "UR": ("Ukraine", 16, 29), "US": ("Ukraine", 16, 29), "UT": ("Ukraine", 16, 29), "UX": ("Ukraine", 16, 29),
+    "UY": ("Ukraine", 16, 29), "EM": ("Ukraine", 16, 29), "EN": ("Ukraine", 16, 29), "EO": ("Ukraine", 16, 29),
+    "ER": ("Moldavie", 16, 29), "EU": ("Biélorussie", 16, 29), "EW": ("Biélorussie", 16, 29),
+    "LY": ("Lituanie", 15, 29), "YL": ("Lettonie", 15, 29), "ES": ("Estonie", 15, 29),
+    "UA2": ("Kaliningrad", 15, 29), "RA2": ("Kaliningrad", 15, 29),
+    "UA9": ("Russie d'Asie", 17, 30), "UA0": ("Russie d'Asie", 19, 30), "RA9": ("Russie d'Asie", 17, 30),
+    "RA0": ("Russie d'Asie", 19, 30), "R9": ("Russie d'Asie", 17, 30), "R0": ("Russie d'Asie", 19, 30),
+    "UA": ("Russie", 16, 29), "RA": ("Russie", 16, 29), "R": ("Russie", 16, 29), "U": ("Russie", 16, 29),
+    "4X": ("Israël", 20, 39), "4Z": ("Israël", 20, 39), "OD": ("Liban", 20, 39), "JY": ("Jordanie", 20, 39),
+    "A4": ("Oman", 21, 39), "A6": ("Émirats arabes unis", 21, 39), "A7": ("Qatar", 21, 39),
+    "A9": ("Bahreïn", 21, 39), "HZ": ("Arabie saoudite", 21, 39), "9K": ("Koweït", 21, 39),
+    "CN": ("Maroc", 33, 37), "7X": ("Algérie", 33, 37), "3V": ("Tunisie", 33, 37), "SU": ("Égypte", 34, 38),
+    "6W": ("Sénégal", 35, 46), "TU": ("Côte d'Ivoire", 35, 46), "TR": ("Gabon", 36, 52),
+    "TJ": ("Cameroun", 36, 47), "5N": ("Nigeria", 35, 46), "ZS": ("Afrique du Sud", 38, 57),
+    "5Z": ("Kenya", 37, 48), "5R": ("Madagascar", 39, 53), "3B8": ("Maurice", 39, 53),
+    "D4": ("Cap-Vert", 35, 46), "EA8": ("Canaries", 33, 36),
+    "VE": ("Canada", 5, 9), "VA": ("Canada", 5, 9), "VO1": ("Terre-Neuve (Canada)", 5, 9),
+    "VO2": ("Labrador (Canada)", 2, 9), "VY": ("Canada", 1, 2), "CY": ("Canada", 5, 9), "CF": ("Canada", 5, 9),
+    "XE": ("Mexique", 6, 10), "KP4": ("Porto Rico", 8, 11), "NP4": ("Porto Rico", 8, 11), "WP4": ("Porto Rico", 8, 11),
+    "KH6": ("Hawaï", 31, 61), "NH6": ("Hawaï", 31, 61), "WH6": ("Hawaï", 31, 61), "AH6": ("Hawaï", 31, 61),
+    "KL7": ("Alaska", 1, 1), "NL7": ("Alaska", 1, 1), "WL7": ("Alaska", 1, 1), "AL7": ("Alaska", 1, 1),
+    "K": ("États-Unis", 5, 8), "N": ("États-Unis", 5, 8), "W": ("États-Unis", 5, 8), "AA": ("États-Unis", 5, 8),
+    "AB": ("États-Unis", 5, 8), "AC": ("États-Unis", 5, 8), "AD": ("États-Unis", 5, 8), "AE": ("États-Unis", 5, 8),
+    "AF": ("États-Unis", 5, 8), "AG": ("États-Unis", 5, 8), "AI": ("États-Unis", 5, 8), "AJ": ("États-Unis", 5, 8),
+    "AK": ("États-Unis", 5, 8),
+    "PY": ("Brésil", 11, 15), "PP": ("Brésil", 11, 15), "PU": ("Brésil", 11, 15), "PT": ("Brésil", 11, 15),
+    "LU": ("Argentine", 13, 14), "CE": ("Chili", 12, 14), "CX": ("Uruguay", 13, 14), "OA": ("Pérou", 10, 12),
+    "HK": ("Colombie", 9, 12), "YV": ("Venezuela", 9, 12), "HC": ("Équateur", 10, 12), "CO": ("Cuba", 8, 11),
+    "CM": ("Cuba", 8, 11), "HI": ("République dominicaine", 8, 11), "HH": ("Haïti", 8, 11),
+    "JA": ("Japon", 25, 45), "JE": ("Japon", 25, 45), "JF": ("Japon", 25, 45), "JG": ("Japon", 25, 45),
+    "JH": ("Japon", 25, 45), "JI": ("Japon", 25, 45), "JJ": ("Japon", 25, 45), "JK": ("Japon", 25, 45),
+    "JL": ("Japon", 25, 45), "JM": ("Japon", 25, 45), "JN": ("Japon", 25, 45), "JO": ("Japon", 25, 45),
+    "JP": ("Japon", 25, 45), "JQ": ("Japon", 25, 45), "JR": ("Japon", 25, 45), "JS": ("Japon", 25, 45),
+    "7J": ("Japon", 25, 45), "7K": ("Japon", 25, 45), "7L": ("Japon", 25, 45), "7M": ("Japon", 25, 45),
+    "7N": ("Japon", 25, 45), "8J": ("Japon", 25, 45),
+    "HL": ("Corée du Sud", 25, 44), "DS": ("Corée du Sud", 25, 44), "6K": ("Corée du Sud", 25, 44),
+    "BV": ("Taïwan", 24, 44), "BY": ("Chine", 24, 44), "BG": ("Chine", 24, 44), "BH": ("Chine", 24, 44),
+    "BD": ("Chine", 24, 44), "BA": ("Chine", 24, 44), "BI": ("Chine", 24, 44), "VR": ("Hong Kong", 24, 44),
+    "VU": ("Inde", 22, 41), "HS": ("Thaïlande", 26, 49), "E2": ("Thaïlande", 26, 49), "9M2": ("Malaisie", 28, 54),
+    "9V": ("Singapour", 28, 54), "YB": ("Indonésie", 28, 54), "YC": ("Indonésie", 28, 54),
+    "YD": ("Indonésie", 28, 54), "DU": ("Philippines", 27, 50), "4X": ("Israël", 20, 39),
+    "VK": ("Australie", 30, 59), "ZL": ("Nouvelle-Zélande", 32, 60), "UN": ("Kazakhstan", 17, 30),
+    "4L": ("Géorgie", 21, 29), "EK": ("Arménie", 21, 29), "4K": ("Azerbaïdjan", 21, 29),
+}
+_PREFIXES_SORTED = sorted(PREFIXES, key=len, reverse=True)
+
+
+def prefix_info(call):
+    """Pays et zones d'après le préfixe (gère F/EA8XYZ, EA8/F4ABC, F4ABC/P)."""
+    parts = [p for p in call.upper().split("/") if p]
+    if not parts:
+        return None
+    base = max(parts, key=len)
+    for p in parts:      # un préfixe ajouté (EA8/F4ABC) l'emporte s'il est court et non P/M/QRP
+        if p is not base and len(p) <= 4 and p not in ("P", "M", "MM", "AM", "QRP", "A") and not p.isdigit():
+            base = p
+            break
+    for pre in _PREFIXES_SORTED:
+        if base.startswith(pre):
+            c, cq, itu = PREFIXES[pre]
+            return {"country": c, "cq": str(cq), "itu": str(itu)}
+    return None
 
 
 class LogDock(QDockWidget):
@@ -191,7 +384,14 @@ class LogDock(QDockWidget):
         s = win.settings
         self.hamqth.user = s.value("hamqth_user", "")
         self.hamqth.password = s.value("hamqth_pass", "")
+        self.hamqth.qrz_user = s.value("qrz_user", "")
+        self.hamqth.qrz_password = s.value("qrz_pass", "")
         self.hamqth.result.connect(self.on_lookup)
+        self._lookup_timer = QTimer(self)
+        self._lookup_timer.setSingleShot(True)
+        self._lookup_timer.setInterval(900)
+        self._lookup_timer.timeout.connect(self.auto_lookup)
+        self._auto = {}                     # champ -> texte rempli automatiquement
         self.t_start = None
 
         w = QWidget()
@@ -225,7 +425,17 @@ class LogDock(QDockWidget):
         self.lb_info = QLabel("")
         self.lb_info.setObjectName("value")
         self.lb_info.setWordWrap(True)
-        v.addWidget(self.lb_info)
+        hi = QHBoxLayout()
+        hi.addWidget(self.lb_info, 1)
+        b = QPushButton("QRZ.com")
+        b.setToolTip("Ouvrir la fiche de l'indicatif sur QRZ.com")
+        b.clicked.connect(lambda: self.open_web("https://www.qrz.com/db/{}"))
+        hi.addWidget(b)
+        b = QPushButton("HamQTH")
+        b.setToolTip("Ouvrir la fiche de l'indicatif sur HamQTH.com")
+        b.clicked.connect(lambda: self.open_web("https://www.hamqth.com/{}"))
+        hi.addWidget(b)
+        v.addLayout(hi)
         h = QHBoxLayout()
         b = QPushButton("Enregistrer le QSO")
         b.setToolTip("Raccourci : Entrée dans le champ Commentaire, ou Ctrl+L")
@@ -293,16 +503,35 @@ class LogDock(QDockWidget):
             if self._last:
                 self.cb_mode.setCurrentText(self.suggest_mode(self._last.mode, self._last.freq))
         self.ed_call.setText(txt.upper())
+        for ed, val in list(self._auto.items()):   # l'indicatif change : on retire l'ancienne fiche
+            if ed.text() == val:
+                ed.clear()
+        self._auto.clear()
         prev = self.log.worked(txt.strip()) if len(txt.strip()) >= 3 else []
         if prev:
             bands = sorted({f"{r['band']} {r['mode']}" for r in prev})
             self.lb_info.setText(f"Déjà contacté {len(prev)} fois : " + ", ".join(bands[:8]))
         else:
             self.lb_info.setText("Nouvel indicatif" if len(txt.strip()) >= 3 else "")
+        self._lookup_timer.start()
+
+    def auto_lookup(self):
+        call = self.ed_call.text().strip().upper()
+        if re.match(r"^([A-Z0-9]{1,4}/)?[A-Z0-9]{1,3}\d[A-Z]{1,4}(/[A-Z0-9]{1,4})?$", call):
+            self.hamqth.lookup(call)
+
+    def open_web(self, url):
+        call = self.ed_call.text().strip().upper()
+        if call:
+            from PySide6.QtCore import QUrl
+            from PySide6.QtGui import QDesktopServices
+            QDesktopServices.openUrl(QUrl(url.format(urllib.parse.quote(call.split("/")[0] if len(
+                call.split("/")[0]) >= 3 else call))))
 
     def on_call_entered(self):
         call = self.ed_call.text().strip().upper()
         if call:
+            self._lookup_timer.stop()
             self.hamqth.lookup(call)
             self.ed_name.setFocus()
 
@@ -313,9 +542,14 @@ class LogDock(QDockWidget):
             self.lb_info.setText(info)
             return
         for ed, key in ((self.ed_name, "name"), (self.ed_qth, "qth"), (self.ed_grid, "grid")):
-            if not ed.text() and info.get(key):
+            if info.get(key) and (not ed.text() or ed.text() == self._auto.get(ed)):
                 ed.setText(info[key])
-        extra = " — ".join(x for x in (info.get("country"), info.get("qth")) if x)
+                self._auto[ed] = info[key]
+        extra = " — ".join(x for x in (info.get("qth"), info.get("country")) if x)
+        zones = " ".join(x for x in ((f"CQ {info['cq']}" if info.get("cq") else ""),
+                                     (f"ITU {info['itu']}" if info.get("itu") else "")) if x)
+        if zones:
+            extra += f" ({zones})"
         pos = getattr(self.win, "station", None)
         if pos and info.get("grid"):
             from .geo import distance_bearing, from_locator
@@ -324,7 +558,12 @@ class LogDock(QDockWidget):
                 extra += f" — {d:.0f} km, cap {b:.0f}°"
             except ValueError:
                 pass
-        self.lb_info.setText(f"{call} : {extra}" if extra else f"{call} trouvé")
+        txt = f"{call} : {extra}" if extra else f"{call} trouvé"
+        if info.get("sources"):
+            txt += f"  [{info['sources']}]"
+        if info.get("hint"):
+            txt += f"\n{info['hint']}"
+        self.lb_info.setText(txt)
         if info.get("grid"):
             self.win.point_rotor_to_grid(info["grid"][:6])
 
@@ -343,6 +582,8 @@ class LogDock(QDockWidget):
             self.cb_mode.setCurrentText(mode)
 
     def clear_form(self):
+        self._auto.clear()
+        self._lookup_timer.stop()
         for ed in (self.ed_call, self.ed_name, self.ed_qth, self.ed_grid, self.ed_ref, self.ed_comment):
             ed.clear()
         self.lb_info.clear()
@@ -461,10 +702,18 @@ class HamQTHDialog(QDialog):
         self.ed_user = QLineEdit(s.value("hamqth_user", ""))
         self.ed_pass = QLineEdit(s.value("hamqth_pass", ""))
         self.ed_pass.setEchoMode(QLineEdit.Password)
+        self.ed_qrz_user = QLineEdit(s.value("qrz_user", ""))
+        self.ed_qrz_pass = QLineEdit(s.value("qrz_pass", ""))
+        self.ed_qrz_pass.setEchoMode(QLineEdit.Password)
         f.addRow("Mon indicatif", self.ed_call)
+        f.addRow("Compte QRZ.com", self.ed_qrz_user)
+        f.addRow("Mot de passe QRZ.com", self.ed_qrz_pass)
         f.addRow("Compte HamQTH", self.ed_user)
         f.addRow("Mot de passe HamQTH", self.ed_pass)
-        t = QLabel("Compte gratuit sur hamqth.com. Le mot de passe est enregistré sur ce PC.")
+        t = QLabel("Les deux comptes sont facultatifs. HamQTH.com est gratuit et donne nom, QTH et locator. "
+                   "QRZ.com donne la fiche complète avec un abonnement XML, et seulement une partie sans. "
+                   "Sans compte, CAT Pilot trouve quand même le pays et les zones, et les indicatifs "
+                   "américains via callook.info. Les mots de passe sont enregistrés sur ce PC.")
         t.setObjectName("hint")
         t.setWordWrap(True)
         f.addRow(t)
