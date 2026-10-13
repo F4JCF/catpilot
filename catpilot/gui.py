@@ -35,6 +35,8 @@ from .logbook import HamQTHDialog, Log, LogDock
 from .spots import SpotsDock, set_bands
 from .wsjtx import WsjtxDock
 from .rotor import RotorDock
+from .satellites import SatDock
+from .sdr import SdrDock
 
 # --- données ----------------------------------------------------------------
 MODE_BUTTONS = [("USB", "USB"), ("LSB", "LSB"), ("CW", "CW"), ("CWR", "CW-R"),
@@ -267,7 +269,9 @@ class MainWindow(QMainWindow):
         self.logdock = LogDock(self, self.log)
         self.wsjtx = WsjtxDock(self, self.log)
         self.rotor = RotorDock(self)
-        for dock, btn in ((self.rotor, self.b_rot), (self.cw, self.b_cw), (self.dvk, self.b_dvk), (self.txa, self.b_txa),
+        self.sat = SatDock(self)
+        self.sdr = SdrDock(self)
+        for dock, btn in ((self.sat, self.b_sat), (self.sdr, self.b_sdr), (self.rotor, self.b_rot), (self.cw, self.b_cw), (self.dvk, self.b_dvk), (self.txa, self.b_txa),
                           (self.spots, self.b_spots), (self.logdock, self.b_log), (self.wsjtx, self.b_wsjtx)):
             self.addDockWidget(Qt.RightDockWidgetArea, dock)
             self.tabifyDockWidget(self.mem, dock)
@@ -664,8 +668,12 @@ class MainWindow(QMainWindow):
         self.b_wsjtx.setCheckable(True)
         self.b_rot = QPushButton("Rotor")
         self.b_rot.setCheckable(True)
+        self.b_sat = QPushButton("Satellites")
+        self.b_sat.setCheckable(True)
+        self.b_sdr = QPushButton("SDR")
+        self.b_sdr.setCheckable(True)
         self.dock_buttons = (self.b_spots, self.b_log, self.b_wsjtx, self.b_mems, self.b_cw,
-                             self.b_dvk, self.b_txa, self.b_rot)
+                             self.b_dvk, self.b_txa, self.b_rot, self.b_sat, self.b_sdr)
         lv.addLayout(ll)
         lo = QHBoxLayout()
         self.ck_auto = QCheckBox("Se connecter au lancement du logiciel")
@@ -676,9 +684,15 @@ class MainWindow(QMainWindow):
             lo.addWidget(w)
             lo.addSpacing(16)
         lo.addStretch()
-        for b in self.dock_buttons:
-            lo.addWidget(b)
         lv.addLayout(lo)
+        lb = QHBoxLayout()
+        t = QLabel("Panneaux :")
+        t.setObjectName("hint")
+        lb.addWidget(t)
+        for b in self.dock_buttons:
+            lb.addWidget(b)
+        lb.addStretch()
+        lv.addLayout(lb)
         pl.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         g.addWidget(pl, 3, 0, 1, 4)
         for r, k in ((0, 3), (1, 2), (2, 2)):   # la ligne du haut (chute d'eau) prend plus de place
@@ -744,6 +758,8 @@ class MainWindow(QMainWindow):
         self.logdock.save_settings(s)
         self.wsjtx.save_settings(s)
         self.rotor.save_settings(s)
+        self.sat.save_settings(s)
+        self.sdr.save_settings(s)
         s.setValue("oob_cut", "true" if self.act_oob.isChecked() else "false")
         s.setValue("night", "true" if self.act_night.isChecked() else "false")
         s.setValue("text_scale", self.text_scale())
@@ -1011,7 +1027,8 @@ class MainWindow(QMainWindow):
         for label, btn in (("Spots POTA, SOTA et DX", self.b_spots), ("Carnet de trafic", self.b_log),
                            ("WSJT-X", self.b_wsjtx), ("Mémoires et scan", self.b_mems),
                            ("CW au clavier", self.b_cw), ("Messages vocaux", self.b_dvk),
-                           ("Audio d'émission", self.b_txa), ("Rotor d'antenne", self.b_rot)):
+                           ("Audio d'émission", self.b_txa), ("Rotor d'antenne", self.b_rot),
+                           ("Satellites", self.b_sat), ("Panoramique SDR", self.b_sdr)):
             a = QAction(label, self)
             a.triggered.connect(lambda _c=False, b=btn: b.setChecked(True))
             aff.addAction(a)

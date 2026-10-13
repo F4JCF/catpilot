@@ -2,3 +2,6 @@ PySide6>=6.6
 pyserial>=3.5
 numpy>=1.26
 sounddevice>=0.4.6
+sgp4>=2.22
+pyrtlsdr>=0.3
+pyrtlsdrlib>=0.0.6

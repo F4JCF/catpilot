@@ -1,4 +1,3 @@
-Nouveautés de la 0.11 :
-- IC-705 : lecture et écriture des mémoires (par groupe), sauvegarde et restauration des menus.
-- Nouveaux postes : Yaesu FT-710 et FTDX10, Icom IC-7300 et IC-9700 (23 cm compris).
-- Rotor d'antenne : GS-232 ou rotctld, rose des vents, orientation vers un locator ou un spot.
+Nouveautés de la 0.12 :
+- Satellites : passages, suivi avec correction Doppler (split VFO A/B), tonalité CTCSS, rotor en azimut et élévation, transpondeurs linéaires.
+- Panoramique SDR (RTL-SDR, NooElec) en USB ou via rtl_tcp : spectre et chute d'eau large, clic pour accorder le poste.

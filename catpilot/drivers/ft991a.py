@@ -382,6 +382,14 @@ class FT991A(RigDriver):
             self.cw_send(*args)
         elif name == "cw_play":
             self.cw_play(*args)
+        elif name == "mode_b":
+            code = MODE_TO_CODE.get(args[0])
+            if code:                       # pas de commande directe : échange A/B, mode, échange
+                self._write("SV;")
+                time.sleep(0.15)
+                self._write(f"MD0{code};")
+                time.sleep(0.15)
+                self._write("SV;")
         elif name == "mem_recall":
             self._write(f"MC{int(args[0]):03d};")
         elif name == "clar_step":

@@ -15,7 +15,7 @@ from .base import RigDriver, RigError, RigRefused, RigTimeout, interp, s_text_fr
 from .ft991a import SM_CAL, SWR_CAL
 
 CIV_ADDR = 0xA4          # adresse CI-V par défaut de l'IC-705
-HAS_SUB = {0x07, 0x14, 0x15, 0x16, 0x1A, 0x1B, 0x1C, 0x21, 0x23, 0x25}  # commandes à sous-commande
+HAS_SUB = {0x07, 0x14, 0x15, 0x16, 0x1A, 0x1B, 0x1C, 0x21, 0x23, 0x25, 0x26}  # commandes à sous-commande
 CTRL = 0xE0
 
 ICOM_MODE = {"LSB": 0x00, "USB": 0x01, "AM": 0x02, "CW": 0x03, "RTTY": 0x04, "FM": 0x05,
@@ -389,6 +389,11 @@ class IC705(RigDriver):
         elif name == "vm":
             self._vm = not self._vm
             self._set([0x08] if self._vm else [0x07])
+        elif name == "mode_b":
+            base = DATA_BASE.get(args[0], args[0])
+            if base in ICOM_MODE:
+                data = 0x01 if args[0] in DATA_BASE else 0x00
+                self._set([0x26, 0x01, ICOM_MODE[base], data, 0x01])
         elif name == "mem_recall":
             self._ch = int(args[0])
             self._vm = True

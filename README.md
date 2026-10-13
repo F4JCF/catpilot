@@ -1,4 +1,4 @@
-# CAT Pilot 0.11 — Yaesu et Icom
+# CAT Pilot 0.12 — Yaesu et Icom
 
 Logiciel de pilotage CAT des Yaesu FT-991A, FT-891, FT-710, FTDX10 et des Icom IC-705, IC-7300, IC-9700 sous Windows, avec partage du CAT
 vers WSJT-X, JTDX, Log4OM, N1MM… grâce à un serveur compatible rigctld.
@@ -156,6 +156,29 @@ Le poste « Simulateur » permet de tout essayer sans radio.
 - Les QSO journalisés dans WSJT-X sont inscrits au carnet (sans doublon).
 - Si JTAlert ou GridTracker écoutent déjà WSJT-X, utilisez l'adresse
   multicast 224.0.0.1 dans WSJT-X et dans CAT Pilot.
+
+### Satellites (bouton « Satellites »)
+- Orbites CelesTrak et transpondeurs SatNOGS (mis en cache, actualisés chaque
+  jour ; liste intégrée de secours : ISS, SO-50, PO-101, RS-44, AO-7).
+- Passages des prochaines 24 h au-dessus d'une élévation choisie, position en
+  temps réel (azimut, élévation, distance, vitesse radiale).
+- **Suivre ce satellite** : réception sur le VFO A, émission sur le VFO B en
+  split, correction Doppler en continu, tonalité CTCSS des relais FM, et rotor
+  piloté en azimut et élévation. Sur un transpondeur linéaire, tournez le VFO
+  pour vous déplacer : l'émission suit (inversion gérée).
+- Fonctionnement en semi-duplex (FT-991A, IC-705…) : on n'entend pas sa propre
+  voie descendante pendant l'émission.
+
+### Panoramique SDR (bouton « SDR »)
+- Clé RTL-SDR (NooElec…) en USB (pilote WinUSB installé avec Zadig) ou via
+  rtl_tcp sur le réseau (clé sur un Raspberry Pi par exemple).
+- Spectre et chute d'eau jusqu'à 1,9 MHz de large, centrés automatiquement sur
+  la fréquence du poste (trait rouge). **Clic sur un signal : le poste s'y
+  accorde.**
+- HF : convertisseur (Ham It Up : décalage 125 MHz) ou échantillonnage direct
+  (clé V3). Réglages de gain et de correction ppm.
+- **Le SDR doit avoir sa propre antenne** ou un coupleur protégé : jamais sur
+  la sortie de l'émetteur.
 
 ### Mise à jour (menu « Mise à jour », à côté de « Aide »)
 - « Vérifier les mises à jour… » consulte la dernière version publiée sur

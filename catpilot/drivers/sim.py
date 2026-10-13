@@ -124,7 +124,9 @@ class SimDriver(RigDriver):
 
     def action(self, name, *args):
         i = self.info
-        if name == "cw_text":
+        if name == "mode_b":
+            self.mode_b = args[0]
+        elif name == "cw_text":
             self.cw_send(*args)
         elif name == "cw_play":
             self.cw_play(*args)
