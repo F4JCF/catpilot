@@ -13,11 +13,24 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt pyinstaller
-      - run: pyinstaller --noconfirm --onefile --windowed --name CATPilot --collect-all pyrtlsdrlib run.py
+      - run: pyinstaller --noconfirm --onefile --windowed --name CATPilot --icon assets/catpilot.ico --add-data "assets/catpilot.ico;assets" --collect-all pyrtlsdrlib run.py
+      - name: Version
+        id: ver
+        shell: bash
+        run: echo "v=$(python -c "import re;print(re.search(r'\"(.+?)\"', open('catpilot/__init__.py').read()).group(1))")" >> "$GITHUB_OUTPUT"
+      - name: Installateur
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) { choco install innosetup -y --no-progress }
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          & $iscc "/DMyVersion=${{ steps.ver.outputs.v }}" installer.iss
       - uses: actions/upload-artifact@v4
         with:
           name: CATPilot-windows
-          path: dist/CATPilot.exe
+          path: |
+            dist/CATPilot.exe
+            dist/CATPilot-Setup-*.exe
       # Publie une « Release » vX.Y.Z quand le numéro de version change :
       # c'est elle que le menu « Mise à jour » du logiciel consulte.
       - name: Publier la version
@@ -26,9 +39,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VER=$(python -c "import re;print(re.search(r'\"(.+?)\"', open('catpilot/__init__.py').read()).group(1))")
+          VER=${{ steps.ver.outputs.v }}
           if gh release view "v$VER" > /dev/null 2>&1; then
             echo "La version v$VER est déjà publiée"
           else
-            gh release create "v$VER" dist/CATPilot.exe --title "CAT Pilot $VER" --notes-file NOTES.md
+            gh release create "v$VER" dist/CATPilot.exe dist/CATPilot-Setup-$VER.exe --title "CAT Pilot $VER" --notes-file NOTES.md
           fi

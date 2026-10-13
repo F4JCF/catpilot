@@ -1,3 +1,5 @@
-Nouveautés de la 0.12 :
-- Satellites : passages, suivi avec correction Doppler (split VFO A/B), tonalité CTCSS, rotor en azimut et élévation, transpondeurs linéaires.
-- Panoramique SDR (RTL-SDR, NooElec) en USB ou via rtl_tcp : spectre et chute d'eau large, clic pour accorder le poste.
+Nouveautés de la 0.13 :
+- Pilotage à distance entre deux CAT Pilot, audio compris, protégé par mot de passe.
+- Installateur Windows (CATPilot-Setup), icône du logiciel.
+- Interface en anglais (menu Affichage > Langue).
+- Boutons standard (Oui, Non, Annuler) en français.

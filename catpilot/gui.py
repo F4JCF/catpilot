@@ -37,6 +37,7 @@ from .wsjtx import WsjtxDock
 from .rotor import RotorDock
 from .satellites import SatDock
 from .sdr import SdrDock
+from .remote import RemoteDock
 
 # --- données ----------------------------------------------------------------
 MODE_BUTTONS = [("USB", "USB"), ("LSB", "LSB"), ("CW", "CW"), ("CWR", "CW-R"),
@@ -271,7 +272,8 @@ class MainWindow(QMainWindow):
         self.rotor = RotorDock(self)
         self.sat = SatDock(self)
         self.sdr = SdrDock(self)
-        for dock, btn in ((self.sat, self.b_sat), (self.sdr, self.b_sdr), (self.rotor, self.b_rot), (self.cw, self.b_cw), (self.dvk, self.b_dvk), (self.txa, self.b_txa),
+        self.remote = RemoteDock(self)
+        for dock, btn in ((self.remote, self.b_remote), (self.sat, self.b_sat), (self.sdr, self.b_sdr), (self.rotor, self.b_rot), (self.cw, self.b_cw), (self.dvk, self.b_dvk), (self.txa, self.b_txa),
                           (self.spots, self.b_spots), (self.logdock, self.b_log), (self.wsjtx, self.b_wsjtx)):
             self.addDockWidget(Qt.RightDockWidgetArea, dock)
             self.tabifyDockWidget(self.mem, dock)
@@ -672,8 +674,10 @@ class MainWindow(QMainWindow):
         self.b_sat.setCheckable(True)
         self.b_sdr = QPushButton("SDR")
         self.b_sdr.setCheckable(True)
+        self.b_remote = QPushButton("À distance")
+        self.b_remote.setCheckable(True)
         self.dock_buttons = (self.b_spots, self.b_log, self.b_wsjtx, self.b_mems, self.b_cw,
-                             self.b_dvk, self.b_txa, self.b_rot, self.b_sat, self.b_sdr)
+                             self.b_dvk, self.b_txa, self.b_rot, self.b_sat, self.b_sdr, self.b_remote)
         lv.addLayout(ll)
         lo = QHBoxLayout()
         self.ck_auto = QCheckBox("Se connecter au lancement du logiciel")
@@ -760,6 +764,7 @@ class MainWindow(QMainWindow):
         self.rotor.save_settings(s)
         self.sat.save_settings(s)
         self.sdr.save_settings(s)
+        self.remote.save_settings(s)
         s.setValue("oob_cut", "true" if self.act_oob.isChecked() else "false")
         s.setValue("night", "true" if self.act_night.isChecked() else "false")
         s.setValue("text_scale", self.text_scale())
@@ -798,8 +803,9 @@ class MainWindow(QMainWindow):
         if not keep_saved:
             self.cb_baud.setCurrentText(str(cls.default_baud))
             self.cb_stop.setCurrentText(str(cls.default_stopbits))
+        serial_rig = cls is not SimDriver and not getattr(cls, "is_remote", False)
         for w in (self.cb_port, self.cb_baud, self.cb_stop):
-            w.setEnabled(cls is not SimDriver)
+            w.setEnabled(serial_rig)
         if hasattr(self, "mode_buttons") and not self.ctrl.connected:
             self._adapt_to_rig(cls)
 
@@ -808,7 +814,8 @@ class MainWindow(QMainWindow):
         if self.ctrl.connected:
             return
         cls = DRIVERS[self.cb_rig.currentText()]
-        if cls is SimDriver or self.cb_port.findData(self.settings.value("port", "")) >= 0:
+        if cls is SimDriver or getattr(cls, "is_remote", False) and self.settings.value("remote_host", "") \
+                or self.cb_port.findData(self.settings.value("port", "")) >= 0:
             self.toggle_connection()
 
     def toggle_connection(self):
@@ -816,16 +823,27 @@ class MainWindow(QMainWindow):
             self.ctrl.disconnect_rig()
             return
         cls = DRIVERS[self.cb_rig.currentText()]
-        port = "SIM" if cls is SimDriver else self.cb_port.currentData()
+        if getattr(cls, "is_remote", False):
+            port = self.remote.prepare_client()
+            if not port:
+                self.b_remote.setChecked(True)
+                QMessageBox.information(self, "Poste distant", "Indiquez l'adresse de la station et son mot de "
+                                        "passe dans le panneau « Accès à distance ».")
+                return
+        else:
+            port = "SIM" if cls is SimDriver else self.cb_port.currentData()
         if not port:
             QMessageBox.warning(self, "Aucun port", "Aucun port série n'est sélectionné. "
-                                "Branchez le câble USB du FT-991A puis cliquez sur ⟳.")
+                                "Branchez le câble USB du poste puis cliquez sur ⟳.")
             return
         try:
             self.ctrl.connect_rig(cls(port, int(self.cb_baud.currentText()),
                                       int(self.cb_stop.currentText())),
                                   power_on=self.ck_on.isChecked())
         except Exception as e:
+            if getattr(cls, "is_remote", False):
+                QMessageBox.critical(self, "Connexion impossible", f"La station {port} n'a pas pu être jointe.\n\n{e}")
+                return
             QMessageBox.critical(self, "Connexion impossible",
                                  f"Le port {port} n'a pas pu être ouvert.\n\n{e}\n\n"
                                  "Vérifiez qu'aucun autre logiciel ne l'utilise déjà.")
@@ -1028,7 +1046,8 @@ class MainWindow(QMainWindow):
                            ("WSJT-X", self.b_wsjtx), ("Mémoires et scan", self.b_mems),
                            ("CW au clavier", self.b_cw), ("Messages vocaux", self.b_dvk),
                            ("Audio d'émission", self.b_txa), ("Rotor d'antenne", self.b_rot),
-                           ("Satellites", self.b_sat), ("Panoramique SDR", self.b_sdr)):
+                           ("Satellites", self.b_sat), ("Panoramique SDR", self.b_sdr),
+                           ("Accès à distance", self.b_remote)):
             a = QAction(label, self)
             a.triggered.connect(lambda _c=False, b=btn: b.setChecked(True))
             aff.addAction(a)
@@ -1052,6 +1071,16 @@ class MainWindow(QMainWindow):
         self.act_night.setShortcut("Ctrl+N")
         self.act_night.toggled.connect(lambda _on: self.apply_look())
         aff.addAction(self.act_night)
+        langs = aff.addMenu("Langue")
+        self.lang_group = QActionGroup(self)
+        from .i18n import LANGS
+        for code, label in LANGS.items():
+            a = QAction(label, self, checkable=True)
+            a.setData(code)
+            a.setChecked(self.settings.value("lang", "fr") == code)
+            a.triggered.connect(lambda _c=False, c=code: self.change_language(c))
+            self.lang_group.addAction(a)
+            langs.addAction(a)
         sizes = aff.addMenu("Taille du texte")
         self.size_group = QActionGroup(self)
         for pct in (90, 100, 115, 130):
@@ -1395,6 +1424,23 @@ class MainWindow(QMainWindow):
         night = self.act_night.isChecked()
         apply_theme(QApplication.instance(), "nuit" if night else "jour", self.text_scale())
         self.bandplan.dim = night
+
+    def change_language(self, code):
+        if code == self.settings.value("lang", "fr"):
+            return
+        self.settings.setValue("lang", code)
+        box = QMessageBox(self)
+        box.setWindowTitle("Langue")
+        box.setText("La langue sera changée au prochain démarrage de CAT Pilot.")
+        now = box.addButton("Redémarrer maintenant", QMessageBox.AcceptRole)
+        box.addButton("Plus tard", QMessageBox.RejectRole)
+        box.exec()
+        if box.clickedButton() is now:
+            from PySide6.QtCore import QProcess
+            args = sys.argv[1:] if getattr(sys, "frozen", False) else sys.argv
+            self._restart_for_update = True          # simple redémarrage : le poste reste allumé
+            self.close()
+            QProcess.startDetached(sys.executable, args)
 
     def show_compact(self):
         self.compact.show()
@@ -1793,6 +1839,18 @@ class MainWindow(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("CAT Pilot")
+    lang = QSettings("F4JCF", "CATPilot").value("lang", "fr")
+    from PySide6.QtCore import QLibraryInfo, QTranslator
+    qt_tr = QTranslator(app)
+    if qt_tr.load(f"qtbase_{lang}", QLibraryInfo.path(QLibraryInfo.TranslationsPath)):
+        app.installTranslator(qt_tr)            # boutons standard (Oui, Non, Annuler…) dans la langue choisie
+    from . import i18n
+    i18n.install(lang)
+    from PySide6.QtGui import QIcon
+    base = getattr(sys, "_MEIPASS", os.path.join(os.path.dirname(__file__), ".."))
+    icon = os.path.join(base, "assets", "catpilot.ico")
+    if os.path.exists(icon):
+        app.setWindowIcon(QIcon(icon))
     app.setStyleSheet(STYLE)
     w = MainWindow()
     w.apply_look()

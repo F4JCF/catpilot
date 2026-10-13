@@ -1,18 +1,16 @@
-# CAT Pilot 0.12 — Yaesu et Icom
+# CAT Pilot 0.13 — Yaesu et Icom
 
 Logiciel de pilotage CAT des Yaesu FT-991A, FT-891, FT-710, FTDX10 et des Icom IC-705, IC-7300, IC-9700 sous Windows, avec partage du CAT
 vers WSJT-X, JTDX, Log4OM, N1MM… grâce à un serveur compatible rigctld.
 
-## Obtenir l'exécutable
+## Installation
 
-1. **Sans rien installer** : déposer ce dossier dans un dépôt GitHub. L'action
-   « Construire l'exécutable Windows » produit `CATPilot.exe`, à télécharger dans
-   l'onglet *Actions* > dernière exécution > *Artifacts*.
-2. **Sur le PC Windows** : installer Python 3.12 (cocher « Add to PATH »), puis
-   double-cliquer sur `build.bat`. L'exécutable apparaît dans `dist\`.
-3. **Pour tester directement** : `pip install -r requirements.txt` puis `python run.py`.
-
-Le poste « Simulateur » permet de tout essayer sans radio.
+- **Installateur** : `CATPilot-Setup-x.y.z.exe` dans la dernière version publiée
+  (https://github.com/F4JCF/catpilot/releases/latest). Installation pour
+  l'utilisateur, sans droits d'administrateur, avec raccourcis sur le bureau et
+  dans le menu Démarrer, et désinstallation propre.
+- **Sans installation** : `CATPilot.exe` de la même page, à lancer tel quel.
+- Ensuite, les mises à jour se font depuis le logiciel (menu « Mise à jour »).
 
 ## Réglage du FT-991A
 
@@ -179,6 +177,25 @@ Le poste « Simulateur » permet de tout essayer sans radio.
   (clé V3). Réglages de gain et de correction ppm.
 - **Le SDR doit avoir sa propre antenne** ou un coupleur protégé : jamais sur
   la sortie de l'émetteur.
+
+### Pilotage à distance (bouton « À distance »)
+- **Sur le PC relié au poste** : cocher « Autoriser l'accès à distance »,
+  choisir un mot de passe (6 caractères au moins) et les entrées/sorties audio
+  du poste (USB Audio CODEC).
+- **Sur le PC distant** : indiquer l'adresse de la station (ex.
+  192.168.1.20:4540, ou son adresse VPN) et le mot de passe, le micro et les
+  haut-parleurs, puis choisir « Poste distant (CAT Pilot) » dans la liste des
+  postes et cliquer sur Connecter. Toute l'interface fonctionne comme en local,
+  y compris le serveur rigctld pour WSJT-X sur le PC distant.
+- Audio dans les deux sens (µ-law 8 kHz, environ 64 kbit/s par sens).
+- Sécurité : mot de passe par défi-réponse (il ne circule jamais), blocage de
+  10 min après 5 essais faux, PTT coupé si le distant se déconnecte ou si son
+  audio s'interrompt plus de 3 s. Les échanges ne sont pas chiffrés : pour
+  Internet, passez de préférence par un VPN (WireGuard, Tailscale) plutôt
+  qu'une redirection de port sur la box.
+
+### Langue (menu Affichage > Langue)
+- Français ou anglais, au prochain démarrage (proposé tout de suite).
 
 ### Mise à jour (menu « Mise à jour », à côté de « Aide »)
 - « Vérifier les mises à jour… » consulte la dernière version publiée sur

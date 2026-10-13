@@ -14,3 +14,12 @@ DRIVERS = {
     "Icom IC-9700": IC9700,
     "Simulateur (sans poste)": SimDriver,
 }
+
+
+def _remote():
+    from ..remote import RemoteDriver
+    return RemoteDriver
+
+
+DRIVERS = {**DRIVERS, "Poste distant (CAT Pilot)": _remote()
+}
