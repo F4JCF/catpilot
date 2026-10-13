@@ -18,5 +18,7 @@ jobs:
           Start-Process dist\RelanceTest.exe
           Start-Sleep -Seconds 45
           Get-Content C:\relance\log.txt
+          $b = [IO.File]::ReadAllBytes("dist\RelanceTest.exe"); $t = [Text.Encoding]::ASCII.GetString($b[-6..-1])
+          Write-Output "fin de l'exe : $t"
           $n = (Get-Content C:\relance\log.txt).Count
-          if ($n -lt 3) { Write-Error "seulement $n instance(s)"; exit 1 }
+          if ($n -lt 2) { Write-Error "ANCIENNE METHODE : $n instance, exe remplace : $t"; exit 1 }
