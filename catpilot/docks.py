@@ -341,7 +341,12 @@ class MenuEditor(QDialog):
         self._filling = True
         self.tbl.setRowCount(len(rows))
         for r, (mid, name, val) in enumerate(rows):
-            label = f"{mid[:2]}-{mid[2:]}" if len(mid) == 4 else mid
+            dash = getattr(self.ctrl.driver, "menu_dash", True)
+            label = mid
+            if dash and len(mid) == 4:
+                label = f"{mid[:2]}-{mid[2:]}"
+            elif dash and len(mid) == 6:
+                label = f"{mid[:2]}-{mid[2:4]}-{mid[4:]}"
             for c, txt in enumerate((label, name, val)):
                 it = QTableWidgetItem(txt)
                 it.setData(Qt.UserRole, mid)

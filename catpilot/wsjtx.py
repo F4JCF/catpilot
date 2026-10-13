@@ -320,6 +320,8 @@ class WsjtxDock(QDockWidget):
     def reply(self, row, _col):
         if 0 <= row < len(getattr(self, "rows", [])):
             self.listener.reply_to(self.rows[row])
+            if self.rows[row].get("grid"):
+                self.win.point_rotor_to_grid(self.rows[row]["grid"])
             self.lb.setText(f"Appel de {self.rows[row]['call']} demandé à WSJT-X")
 
     def on_logged(self, text):

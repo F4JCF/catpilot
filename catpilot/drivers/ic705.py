@@ -14,7 +14,7 @@ import time
 from .base import RigDriver, RigError, RigRefused, RigTimeout, interp, s_text_from_db
 from .ft991a import SM_CAL, SWR_CAL
 
-CIV_ADDR = 0xA4
+CIV_ADDR = 0xA4          # adresse CI-V par défaut de l'IC-705
 HAS_SUB = {0x07, 0x14, 0x15, 0x16, 0x1A, 0x1B, 0x1C, 0x21, 0x23, 0x25}  # commandes à sous-commande
 CTRL = 0xE0
 
@@ -26,6 +26,35 @@ CTCSS = [67.0, 69.3, 71.9, 74.4, 77.0, 79.7, 82.5, 85.4, 88.5, 91.5, 94.8, 97.4,
          151.4, 156.7, 159.8, 162.2, 165.5, 167.9, 171.3, 173.8, 177.3, 179.9, 183.5,
          186.2, 189.9, 192.8, 196.6, 199.5, 203.5, 206.5, 210.7, 218.1, 225.7, 229.1,
          233.6, 241.8, 250.3, 254.1]
+BLOCK = 47              # octets d'un bloc fréquence/mode/tonalités/indicatifs D-STAR
+ICOM_TO_CODE = {   # (mode, data, étroit) -> code de mode du panneau Mémoires
+    ("USB", False, False): "2", ("USB", False, True): "2", ("LSB", False, False): "1", ("LSB", False, True): "1",
+    ("CW", False, False): "3", ("CW", False, True): "3", ("CWR", False, False): "7", ("CWR", False, True): "7",
+    ("AM", False, False): "5", ("AM", False, True): "D", ("FM", False, False): "4", ("FM", False, True): "B",
+    ("USB", True, False): "C", ("USB", True, True): "C", ("LSB", True, False): "8", ("LSB", True, True): "8",
+    ("FM", True, False): "A", ("FM", True, True): "A", ("RTTY", False, False): "6", ("RTTY", False, True): "6",
+    ("RTTYR", False, False): "9", ("RTTYR", False, True): "9", ("DV", False, False): "V", ("DV", False, True): "V",
+}
+CODE_TO_ICOM = {"2": ("USB", False, False), "1": ("LSB", False, False), "3": ("CW", False, False),
+                "7": ("CWR", False, False), "5": ("AM", False, False), "D": ("AM", False, True),
+                "4": ("FM", False, False), "B": ("FM", False, True), "E": ("FM", False, False),
+                "C": ("USB", True, False), "8": ("LSB", True, False), "A": ("FM", True, False),
+                "6": ("RTTY", False, False), "9": ("RTTYR", False, False), "V": ("DV", False, False)}
+
+
+def repeater_offset(hz):
+    """Décalage relais usuel (Hz) : 600 kHz en 2 m, 1,6 MHz (France) ou 7,6 MHz en 70 cm."""
+    if 144_000_000 <= hz < 146_000_000:
+        return 600_000
+    if 430_000_000 <= hz < 431_000_000:
+        return 1_600_000
+    if 431_000_000 <= hz < 440_000_000:
+        return 7_600_000
+    if 29_500_000 <= hz < 29_700_000:
+        return 100_000
+    return 0
+
+
 # Repères des échelles Icom (valeur brute -> grandeur)
 SWR_ICOM = [(0, 1.0), (48, 1.5), (80, 2.0), (120, 3.0), (255, 6.0)]
 PO_ICOM = [(0, 0.0), (143, 0.5), (213, 1.0), (255, 1.2)]
@@ -93,6 +122,7 @@ FUNCS = {"nb": 0x22, "dnr": 0x40, "dnf": 0x41, "proc": 0x44, "mon": 0x45, "vox":
 
 class IC705(RigDriver):
     name = "Icom IC-705"
+    civ_addr = CIV_ADDR
     modes = ["LSB", "USB", "CW", "CWR", "AM", "FM", "RTTY", "RTTYR", "PKTUSB", "PKTLSB", "PKTFM"]
     default_baud = 115200
     default_stopbits = 1
@@ -102,11 +132,18 @@ class IC705(RigDriver):
     has_qmb = False
     has_usb_audio = True            # codec USB intégré (« USB Audio CODEC »)
     has_gps = True
-    menu_skip = set()
+    mem_groups = 100                # 100 groupes de 100 canaux
+    mem_range = (0, 99)
+    mem_tag_len = 16
+    menu_last = 362
+    menu_dash = False               # numéros de menus affichés tels quels (0131…)
+    # Jamais réécrits : CI-V transceive/écho (la liaison en dépend), date et heure.
+    menu_skip = {"0131", "0132", "0165", "0166"}
 
     def __init__(self, *a):
         super().__init__(*a)
-        self.addr = CIV_ADDR
+        self.addr = self.civ_addr
+        self.mem_group = 0
         self._keys = list(LEVELS) + list(FUNCS) + ["pwr", "att", "pre", "agc", "bkin", "atu",
                                                    "split_dup", "vfob", "tone_mode", "tone", "rit", "gps"]
         self._slow = 0
@@ -355,6 +392,7 @@ class IC705(RigDriver):
         elif name == "mem_recall":
             self._ch = int(args[0])
             self._vm = True
+            self._mem_select(self.mem_group)
             self._set([0x08, *bcd(self._ch, 2, little=False)])
         elif name in ("up", "down"):
             f = unbcd(self._cmd([0x03])[:5])
@@ -382,15 +420,146 @@ class IC705(RigDriver):
     def cw_play(self, slot):
         pass
 
-    # --- fonctions pas encore prises en charge ---------------------------------------------
+    # --- mémoires (commande 1A 00) -------------------------------------------------------
+    # Corps lu : groupe(2) canal(2) sélection(1) puis bloc(s) de 47 octets
+    # [fréq(5) mode filtre data duplex/tonalité dsql tonalité-relais(3) tsql(3) dtcs(3) dv(1)
+    #  décalage(3) UR(8) R1(8) R2(8)], et le nom sur les 16 derniers octets.
+    # Le bloc émission (en split) suit éventuellement le bloc réception : on garde
+    # la disposition exacte d'un canal lu sur le poste et on ne remplace que les champs.
+    def _mem_select(self, group):
+        if self.mem_groups:
+            self._set([0x08, 0xA0, *bcd(group, 2, little=False)])
+
+    def _mem_payload(self, ch):
+        if self.mem_groups:
+            return [*bcd(self.mem_group, 2, little=False), *bcd(ch, 2, little=False)]
+        return [*bcd(ch, 2, little=False)]
+
+    def _parse_mem(self, ch, d):
+        head = len(self._mem_payload(ch)) + 1        # groupe/canal + octet de sélection
+        blk = d[head:head + BLOCK]
+        if len(blk) < BLOCK:
+            return None
+        mode_b, filt, data = blk[5], blk[6], blk[7]
+        name = next((k for k, v in ICOM_MODE.items() if v == mode_b), "FM")
+        code = ICOM_TO_CODE.get((name, bool(data), filt >= 2), "4")
+        dup, tone = blk[8] >> 4, blk[8] & 0x0F
+        return {"ch": ch, "freq": unbcd(blk[0:5]), "code": code, "mode": name,
+                "tag": d[-self.mem_tag_len:].decode("ascii", "replace").strip(),
+                "shift": {0: 0, 1: 2, 2: 1}.get(dup, 0), "ctcss": {0: 0, 1: 2, 2: 1, 3: 3}.get(tone, 0),
+                "clar": 0, "raw": d.hex()}
+
     def read_memories(self, progress=None):
-        raise RigError("la lecture des mémoires de l'IC-705 n'est pas encore prise en charge")
+        self._mem_select(self.mem_group)
+        out = []
+        lo, hi = self.mem_range
+        for ch in range(lo, hi + 1):
+            if progress and ch % 10 == 0:
+                progress(f"Lecture des mémoires… {ch}/{hi}")
+            try:
+                d = self._cmd([0x1A, 0x00, *self._mem_payload(ch)], timeout=0.6)
+            except RigError:
+                continue
+            body = d[len(self._mem_payload(ch)):]
+            if not body or body[:1] == b"\xff":
+                continue                                 # canal vide
+            m = self._parse_mem(ch, d)
+            if m:
+                out.append(m)
+        return out
+
+    def _build_mem(self, m, template_hex):
+        d = bytearray(bytes.fromhex(template_hex))
+        ch = int(m["ch"])
+        pl = bytes(self._mem_payload(ch))
+        d[:len(pl)] = pl
+        head = len(pl) + 1
+        d[len(pl)] = 0x00                                 # pas de sélection, pas de split
+        name, data, narrow = CODE_TO_ICOM.get(m.get("code", "4"), ("FM", False, False))
+        nblocks = (len(d) - head - self.mem_tag_len) // BLOCK
+        for b in range(max(1, nblocks)):
+            o = head + b * BLOCK
+            d[o:o + 5] = bcd(int(m["freq"]), 5)
+            d[o + 5] = ICOM_MODE[name]
+            d[o + 6] = 2 if narrow else 1
+            d[o + 7] = 1 if data else 0
+            dup = {0: 0, 1: 2, 2: 1}.get(int(m.get("shift", 0)), 0)
+            tone = {0: 0, 1: 2, 2: 1, 3: 3}.get(int(m.get("ctcss", 0)), 0)
+            d[o + 8] = (dup << 4) | tone
+            off = repeater_offset(int(m["freq"]))
+            if dup and off:
+                d[o + 25:o + 28] = bcd(off // 100, 3)
+        tag = m.get("tag", "")[:self.mem_tag_len].ljust(self.mem_tag_len)
+        d[-self.mem_tag_len:] = tag.encode("ascii", "replace")
+        return bytes(d)
 
     def write_memories(self, mems, template, progress=None):
-        raise RigError("l'écriture des mémoires de l'IC-705 n'est pas encore prise en charge")
+        if not template:
+            raise RigError("lisez d'abord les mémoires : un canal programmé sert de modèle")
+        self._mem_select(self.mem_group)
+        out = []
+        for i, m in enumerate(mems, 1):
+            if progress:
+                progress(f"Écriture des mémoires… {i}/{len(mems)}")
+            ok = False
+            try:
+                data = self._build_mem(m, m.get("raw") or template)
+                self._cmd([0x1A, 0x00, *data], timeout=0.8)
+                back = self._parse_mem(int(m["ch"]), self._cmd([0x1A, 0x00, *self._mem_payload(int(m["ch"]))]))
+                ok = bool(back) and back["freq"] == int(m["freq"]) and \
+                    back["tag"] == m.get("tag", "")[:self.mem_tag_len].strip()
+            except (RigError, ValueError, KeyError):
+                pass
+            out.append((int(m["ch"]), ok))
+        return out
+
+    # --- menus (commande 1A 05) --------------------------------------------------------------
+    def menu_ids(self):
+        return [f"{n:04d}" for n in range(1, self.menu_last + 1)]
+
+    def read_menu(self, mid):
+        d = self._cmd([0x1A, 0x05, *bcd(int(mid), 2, little=False)])
+        return d[2:].hex()
+
+    def write_menu(self, mid, value):
+        if mid in self.menu_skip:
+            return False
+        self._cmd([0x1A, 0x05, *bcd(int(mid), 2, little=False), *bytes.fromhex(value)])
+        time.sleep(0.05)
+        return self.read_menu(mid) == value
 
     def read_menus(self, progress=None):
-        raise RigError("la sauvegarde des menus de l'IC-705 n'est pas encore prise en charge")
+        menus = {}
+        for mid in self.menu_ids():
+            if progress and int(mid) % 20 == 0:
+                progress(f"Lecture des menus du poste… {mid}")
+            try:
+                menus[mid] = self.read_menu(mid)
+            except RigError:
+                pass
+        return menus
 
     def write_menus(self, menus, progress=None):
-        raise RigError("la restauration des menus de l'IC-705 n'est pas encore prise en charge")
+        res = {"changed": [], "same": 0, "failed": [], "skipped": sorted(self.menu_skip & set(menus))}
+        lost = 0
+        for i, (mid, value) in enumerate(sorted(menus.items()), 1):
+            if mid in self.menu_skip:
+                continue
+            if progress and i % 20 == 0:
+                progress(f"Restauration des menus… {i}/{len(menus)}")
+            try:
+                if self.read_menu(mid) == value:
+                    res["same"] += 1
+                elif self.write_menu(mid, value):
+                    res["changed"].append(mid)
+                else:
+                    res["failed"].append(mid)
+                lost = 0
+            except RigTimeout:
+                res["failed"].append(mid)
+                lost += 1
+                if lost >= 3:
+                    raise RigError("liaison perdue pendant la restauration ; vérifiez le poste")
+            except RigError:
+                res["failed"].append(mid)
+        return res

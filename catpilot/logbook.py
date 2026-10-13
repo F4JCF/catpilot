@@ -325,6 +325,8 @@ class LogDock(QDockWidget):
             except ValueError:
                 pass
         self.lb_info.setText(f"{call} : {extra}" if extra else f"{call} trouvé")
+        if info.get("grid"):
+            self.win.point_rotor_to_grid(info["grid"][:6])
 
     def on_mode(self, mode):
         self.ed_sent.setText(adif.default_rst(mode))

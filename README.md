@@ -1,6 +1,6 @@
-# CAT Pilot 0.10 — Yaesu FT-991A, FT-891 et Icom IC-705
+# CAT Pilot 0.11 — Yaesu et Icom
 
-Logiciel de pilotage CAT des Yaesu FT-991A, FT-891 et de l'Icom IC-705 sous Windows, avec partage du CAT
+Logiciel de pilotage CAT des Yaesu FT-991A, FT-891, FT-710, FTDX10 et des Icom IC-705, IC-7300, IC-9700 sous Windows, avec partage du CAT
 vers WSJT-X, JTDX, Log4OM, N1MM… grâce à un serveur compatible rigctld.
 
 ## Obtenir l'exécutable
@@ -178,8 +178,29 @@ Le poste « Simulateur » permet de tout essayer sans radio.
   break-in, vitesse et note CW, RIT/ΔTX, décalage relais et CTCSS, CW au clavier
   (commande CI-V directe), allumage/extinction, chute d'eau (codec USB intégré).
 - Grisés car sans équivalent : largeur et shift façon Yaesu, contour, APF,
-  NAR, keyer, QMB, mémoires du keyer. Pas encore pris en charge : lecture et
-  écriture des mémoires, sauvegarde des menus, mode DV.
+  NAR, keyer, QMB, mémoires du keyer.
+- **Mémoires** : lecture et écriture par groupe (100 groupes de 100 canaux,
+  noms de 16 caractères). L'écriture part d'un canal déjà programmé sur le
+  poste, dont la disposition est conservée ; le décalage relais est réglé
+  automatiquement (600 kHz en 2 m ; 1,6 MHz sous 431 MHz et 7,6 MHz au-delà
+  en 70 cm). Essayez d'abord sur un canal libre.
+- **Menus** : sauvegarde et restauration des 362 réglages (1A 05), sauf
+  CI-V transceive/écho, date et heure.
+
+### Autres postes
+- **Yaesu FT-710 et FTDX10** : même protocole que le FT-991A (HF et 6 m,
+  menus groupe-sous-groupe-item).
+- **Icom IC-7300** (adresse CI-V 94h) et **IC-9700** (A2h, 2 m, 70 cm,
+  23 cm) : même protocole que l'IC-705. Mémoires et menus pas encore pris en
+  charge sur ces deux postes.
+- Ces postes n'ont été testés qu'avec un poste simulé : signalez tout écart.
+
+### Rotor d'antenne (bouton « Rotor »)
+- Yaesu GS-232A/B et compatibles (ERC, K3NG…) sur port série, ou rotctld de
+  Hamlib sur le réseau ; azimut et élévation.
+- Rose des vents : clic pour orienter. Cap saisi, locator visé (court ou long
+  chemin), et orientation automatique lors d'un double-clic sur un spot, d'une
+  recherche HamQTH ou d'un appel WSJT-X (option).
 
 ### Sauvegarde du poste (menu « Poste »)
 - **Sauvegarder les menus du poste** : tous les réglages du menu, plus les

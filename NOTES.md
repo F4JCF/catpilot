@@ -1,4 +1,4 @@
-Nouveautés de la 0.10 :
-- Spots POTA, SOTA et DX cluster : double-clic pour accorder le poste et préparer le QSO.
-- Carnet de trafic : recherche HamQTH, « déjà contacté », import/export ADIF, export d'activation POTA.
-- Liaison WSJT-X : stations entendues, appel par double-clic, QSO inscrits automatiquement au carnet.
+Nouveautés de la 0.11 :
+- IC-705 : lecture et écriture des mémoires (par groupe), sauvegarde et restauration des menus.
+- Nouveaux postes : Yaesu FT-710 et FTDX10, Icom IC-7300 et IC-9700 (23 cm compris).
+- Rotor d'antenne : GS-232 ou rotctld, rose des vents, orientation vers un locator ou un spot.

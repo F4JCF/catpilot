@@ -34,6 +34,7 @@ from .voicekeyer import VoiceDock
 from .logbook import HamQTHDialog, Log, LogDock
 from .spots import SpotsDock, set_bands
 from .wsjtx import WsjtxDock
+from .rotor import RotorDock
 
 # --- données ----------------------------------------------------------------
 MODE_BUTTONS = [("USB", "USB"), ("LSB", "LSB"), ("CW", "CW"), ("CWR", "CW-R"),
@@ -265,7 +266,8 @@ class MainWindow(QMainWindow):
         self.spots = SpotsDock(self)
         self.logdock = LogDock(self, self.log)
         self.wsjtx = WsjtxDock(self, self.log)
-        for dock, btn in ((self.cw, self.b_cw), (self.dvk, self.b_dvk), (self.txa, self.b_txa),
+        self.rotor = RotorDock(self)
+        for dock, btn in ((self.rotor, self.b_rot), (self.cw, self.b_cw), (self.dvk, self.b_dvk), (self.txa, self.b_txa),
                           (self.spots, self.b_spots), (self.logdock, self.b_log), (self.wsjtx, self.b_wsjtx)):
             self.addDockWidget(Qt.RightDockWidgetArea, dock)
             self.tabifyDockWidget(self.mem, dock)
@@ -660,8 +662,10 @@ class MainWindow(QMainWindow):
         self.b_log.setCheckable(True)
         self.b_wsjtx = QPushButton("WSJT-X")
         self.b_wsjtx.setCheckable(True)
+        self.b_rot = QPushButton("Rotor")
+        self.b_rot.setCheckable(True)
         self.dock_buttons = (self.b_spots, self.b_log, self.b_wsjtx, self.b_mems, self.b_cw,
-                             self.b_dvk, self.b_txa)
+                             self.b_dvk, self.b_txa, self.b_rot)
         lv.addLayout(ll)
         lo = QHBoxLayout()
         self.ck_auto = QCheckBox("Se connecter au lancement du logiciel")
@@ -739,6 +743,7 @@ class MainWindow(QMainWindow):
         self.spots.save_settings(s)
         self.logdock.save_settings(s)
         self.wsjtx.save_settings(s)
+        self.rotor.save_settings(s)
         s.setValue("oob_cut", "true" if self.act_oob.isChecked() else "false")
         s.setValue("night", "true" if self.act_night.isChecked() else "false")
         s.setValue("text_scale", self.text_scale())
@@ -837,12 +842,12 @@ class MainWindow(QMainWindow):
 
     def tune_by(self, delta):
         f = self.ctrl.snapshot().freq + delta
-        self.ctrl.set_freq(max(30000, min(470000000, f)))
+        self.ctrl.set_freq(max(30000, min(getattr(self.ctrl.driver, "max_freq", 470_000_000), f)))
 
     def tune_b(self, delta):
         f = self.ctrl.snapshot().p.get("vfob", 0) + delta
         if f > 0:
-            self.ctrl.set_param("vfob", max(30000, min(470000000, f)))
+            self.ctrl.set_param("vfob", max(30000, min(getattr(self.ctrl.driver, "max_freq", 470_000_000), f)))
 
     def on_entry(self):
         txt = self.ed_freq.text().strip().replace(",", ".")
@@ -1006,7 +1011,7 @@ class MainWindow(QMainWindow):
         for label, btn in (("Spots POTA, SOTA et DX", self.b_spots), ("Carnet de trafic", self.b_log),
                            ("WSJT-X", self.b_wsjtx), ("Mémoires et scan", self.b_mems),
                            ("CW au clavier", self.b_cw), ("Messages vocaux", self.b_dvk),
-                           ("Audio d'émission", self.b_txa)):
+                           ("Audio d'émission", self.b_txa), ("Rotor d'antenne", self.b_rot)):
             a = QAction(label, self)
             a.triggered.connect(lambda _c=False, b=btn: b.setChecked(True))
             aff.addAction(a)
@@ -1314,6 +1319,8 @@ class MainWindow(QMainWindow):
         minf = getattr(drv, "min_freq", 0)
         for name, lo, hi, _d in BANDS:
             self.band_buttons[name].setVisible(lo <= maxf and hi >= minf)
+        if hasattr(self, "mem"):
+            self.mem.adapt(drv)
         if hasattr(self, "compact"):
             self.compact.fill_modes(drv.modes + (["C4FM"] if getattr(drv, "has_c4fm", False) else []))
         self.mode_buttons["C4FM"].setVisible(getattr(drv, "has_c4fm", True))

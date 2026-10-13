@@ -326,6 +326,7 @@ class FT991A(RigDriver):
 
     def write_menus(self, menus, progress=None):
         res = {"changed": [], "same": 0, "failed": [], "skipped": sorted(self.menu_skip & set(menus))}
+        lost = 0
         for i, (mid, value) in enumerate(sorted(menus.items()), 1):
             if mid in self.menu_skip:
                 continue
@@ -338,6 +339,12 @@ class FT991A(RigDriver):
                     res["changed"].append(mid)
                 else:
                     res["failed"].append(mid)
+                lost = 0
+            except RigTimeout:
+                res["failed"].append(mid)
+                lost += 1
+                if lost >= 3:      # plus de réponse : vitesse CAT changée ou poste coupé
+                    raise RigError("liaison perdue pendant la restauration ; vérifiez la vitesse CAT du poste")
             except RigError:
                 res["failed"].append(mid)
         return res

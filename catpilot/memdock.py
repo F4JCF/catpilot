@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 # Libellé affiché <-> code de mode du FT-991A
 MEM_MODES = [("USB", "2"), ("LSB", "1"), ("CW", "3"), ("CW-R", "7"), ("AM", "5"), ("AM-N", "D"),
              ("FM", "4"), ("FM-N", "B"), ("C4FM", "E"), ("DATA-U", "C"), ("DATA-L", "8"),
-             ("DATA-FM", "A"), ("RTTY-L", "6"), ("RTTY-U", "9")]
+             ("DATA-FM", "A"), ("RTTY-L", "6"), ("RTTY-U", "9"), ("DV", "V")]
 LABEL_TO_CODE = dict(MEM_MODES)
 CODE_TO_LABEL = {c: l for l, c in MEM_MODES}
 SHIFTS = ["", "+", "−"]
@@ -34,10 +34,10 @@ def backup_dir():
     return d
 
 
-def clean_tag(txt):
-    """Nom de mémoire : 12 caractères ASCII maximum (le poste n'affiche pas les accents)."""
+def clean_tag(txt, length=12):
+    """Nom de mémoire en ASCII (le poste n'affiche pas les accents), longueur selon le poste."""
     txt = unicodedata.normalize("NFKD", txt).encode("ascii", "ignore").decode()
-    return txt[:12]
+    return txt[:length]
 
 
 def parse_freq(txt):
@@ -131,7 +131,7 @@ class MemoryDock(QDockWidget):
             self.buttons.append(b)
             return b
 
-        btn("Lire les mémoires", lambda: self.ctrl.job("read_memories"), 0, 0)
+        btn("Lire les mémoires", self.read_from_radio, 0, 0)
         btn("Rappeler", lambda: self.recall(self.tbl.currentRow()), 0, 1)
         btn("Ajouter un canal", self.add_channel, 0, 2, "Nouveau canal libre avec la fréquence et le mode actuels")
         self.b_write = btn("Écrire dans le poste", self.write_to_radio, 1, 0,
@@ -139,6 +139,15 @@ class MemoryDock(QDockWidget):
         btn("Importer CSV", self.import_csv, 1, 1)
         btn("Exporter CSV", self.export_csv, 1, 2)
         v.addLayout(g)
+        gh = QHBoxLayout()
+        self.lb_group = QLabel("Groupe de mémoires")
+        self.sp_group = QSpinBox()
+        self.sp_group.setRange(0, 99)
+        self.sp_group.setToolTip("L'IC-705 range ses mémoires en 100 groupes de 100 canaux")
+        gh.addWidget(self.lb_group)
+        gh.addWidget(self.sp_group)
+        gh.addStretch()
+        v.addLayout(gh)
         self.lb_info = QLabel("")
         self.lb_info.setObjectName("hint")
         v.addWidget(self.lb_info)
@@ -192,6 +201,27 @@ class MemoryDock(QDockWidget):
         self.ctrl.job_done.connect(self.on_job)
         self._update_info()
 
+    # --- particularités du poste ----------------------------------------------------------
+    def _drv(self):
+        return self.ctrl.driver
+
+    def tag_len(self):
+        return getattr(self._drv(), "mem_tag_len", 12)
+
+    def mem_range(self):
+        return getattr(self._drv(), "mem_range", (1, 117))
+
+    def adapt(self, drv):
+        grouped = bool(getattr(drv, "mem_groups", None))
+        self.lb_group.setVisible(grouped)
+        self.sp_group.setVisible(grouped)
+
+    def read_from_radio(self):
+        drv = self._drv()
+        if drv is not None and getattr(drv, "mem_groups", None):
+            drv.mem_group = self.sp_group.value()
+        self.ctrl.job("read_memories")
+
     # --- tableau ------------------------------------------------------------------
     def set_memories(self, mems, from_radio=True):
         for m in mems:
@@ -233,7 +263,7 @@ class MemoryDock(QDockWidget):
         txt = it.text()
         try:
             if c == 1:
-                m["tag"] = clean_tag(txt)
+                m["tag"] = clean_tag(txt, self.tag_len())
             elif c == 2:
                 m["freq"] = parse_freq(txt)
             elif c == 3:
@@ -257,9 +287,11 @@ class MemoryDock(QDockWidget):
 
     def add_channel(self):
         used = {m["ch"] for m in self.memories}
-        free = next((c for c in range(1, 100) if c not in used), None)
+        lo, hi = self.mem_range()
+        hi = min(hi, 99)                  # au-delà : canaux spéciaux (limites de scan…)
+        free = next((c for c in range(lo, hi + 1) if c not in used), None)
         if free is None:
-            QMessageBox.information(self, "Plus de place", "Les canaux 001 à 099 sont tous occupés.")
+            QMessageBox.information(self, "Plus de place", f"Les canaux {lo:03d} à {hi:03d} sont tous occupés.")
             return
         st = self.ctrl.snapshot()
         code = {"USB": "2", "LSB": "1", "CW": "3", "CWR": "7", "AM": "5", "FM": "4", "PKTUSB": "C",
@@ -313,10 +345,11 @@ class MemoryDock(QDockWidget):
                 continue                     # en-tête ou ligne vide
             try:
                 ch = int(row[0])
-                if not 1 <= ch <= 117:
-                    raise ValueError(f"canal {ch} hors limites (1 à 117)")
+                lo, hi = self.mem_range()
+                if not lo <= ch <= hi:
+                    raise ValueError(f"canal {ch} hors limites ({lo} à {hi})")
                 m = by_ch.get(ch, {"ch": ch, "clar": 0})
-                m["tag"] = clean_tag(row[1] if len(row) > 1 else "")
+                m["tag"] = clean_tag(row[1] if len(row) > 1 else "", self.tag_len())
                 m["freq"] = parse_freq(row[2])
                 mode = (row[3].strip().upper() if len(row) > 3 else "FM").replace("CWR", "CW-R")
                 m["code"] = next((c for l, c in MEM_MODES if l.upper() == mode), "4")
@@ -349,12 +382,15 @@ class MemoryDock(QDockWidget):
         if not todo:
             QMessageBox.information(self, "Rien à écrire", "Aucune ligne modifiée.")
             return
+        drv = self._drv()
+        if getattr(drv, "mem_groups", None):
+            drv.mem_group = self.sp_group.value()
         listing = "\n".join(f"{m['ch']:03d}  {m.get('tag', ''):<12}  {fmt_freq(m['freq'])}  {mem_label(m)}"
                             for m in todo[:12])
         if len(todo) > 12:
             listing += f"\n… et {len(todo) - 12} autres"
         if QMessageBox.question(self, "Écrire dans le poste",
-                                f"Écrire {len(todo)} canal(aux) dans le FT-991A ?\n\n{listing}\n\n"
+                                f"Écrire {len(todo)} canal(aux) dans le {self._drv().name} ?\n\n{listing}\n\n"
                                 "Les mémoires actuelles du poste seront d'abord sauvegardées.") \
                 != QMessageBox.Yes:
             return
