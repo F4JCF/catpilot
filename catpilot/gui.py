@@ -1436,11 +1436,10 @@ class MainWindow(QMainWindow):
         box.addButton("Plus tard", QMessageBox.RejectRole)
         box.exec()
         if box.clickedButton() is now:
-            from PySide6.QtCore import QProcess
-            args = sys.argv[1:] if getattr(sys, "frozen", False) else sys.argv
+            from .updater import restart
             self._restart_for_update = True          # simple redémarrage : le poste reste allumé
+            restart()
             self.close()
-            QProcess.startDetached(sys.executable, args)
 
     def show_compact(self):
         self.compact.show()

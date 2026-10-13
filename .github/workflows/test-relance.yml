@@ -1,0 +1,22 @@
+name: Test de relance
+on:
+  push:
+    branches: [test-relance]
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install PySide6 pyinstaller
+      - run: pyinstaller --noconfirm --onefile --windowed --name RelanceTest --paths . ci/test_relance.py
+      - name: Lancer et vérifier
+        shell: pwsh
+        run: |
+          Start-Process dist\RelanceTest.exe
+          Start-Sleep -Seconds 45
+          Get-Content C:\relance\log.txt
+          $n = (Get-Content C:\relance\log.txt).Count
+          if ($n -lt 3) { Write-Error "seulement $n instance(s)"; exit 1 }

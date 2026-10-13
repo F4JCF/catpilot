@@ -107,26 +107,65 @@ class Updater(QObject):
             self.downloaded.emit(e)
 
 
+def clean_env():
+    """Environnement pour lancer une NOUVELLE instance du logiciel.
+
+    Sans cela, l'exécutable PyInstaller relancé croit être la suite de l'instance
+    qui se ferme, réutilise son dossier temporaire (supprimé à la fermeture) et
+    s'arrête sans rien afficher.
+    """
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("_MEI", "_PYI"))}
+    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    return env
+
+
+def spawn_detached(cmd):
+    """Lance un processus indépendant, qui survit à la fermeture du logiciel."""
+    if sys.platform != "win32":
+        subprocess.Popen(cmd, env=clean_env(), start_new_session=True, close_fds=True)
+        return
+    base = 0x08000000 | 0x00000200          # CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
+    try:                                    # hors du « job » de l'application si Windows l'autorise
+        subprocess.Popen(cmd, env=clean_env(), creationflags=base | 0x01000000, close_fds=True)
+    except OSError:
+        subprocess.Popen(cmd, env=clean_env(), creationflags=base, close_fds=True)
+
+
+def restart():
+    """Relance le logiciel (après un changement de langue, par exemple)."""
+    if getattr(sys, "frozen", False):
+        exe = sys.executable
+        bat = os.path.join(tempfile.gettempdir(), "catpilot_relance.bat")
+        with open(bat, "w", encoding="mbcs" if sys.platform == "win32" else "utf-8") as f:
+            f.write(_wait_lines() + f'start "" "{exe}"\ndel "%~f0"\n')
+        spawn_detached(["cmd", "/c", bat])
+    else:
+        spawn_detached([sys.executable] + sys.argv)
+
+
+def _wait_lines():
+    """Attend la fin de ce processus et de son lanceur PyInstaller (qui verrouille l'exe)."""
+    image = os.path.basename(sys.executable)
+    out = "@echo off\n"
+    for pid in sorted({os.getpid(), os.getppid()}):
+        out += (f":attente{pid}\n"
+                f'tasklist /FI "PID eq {pid}" /FI "IMAGENAME eq {image}" 2>nul | find " {pid} " >nul && '
+                f"(ping -n 2 127.0.0.1 >nul & goto attente{pid})\n")
+    return out + "ping -n 2 127.0.0.1 >nul\n"
+
+
 def install_and_restart(new_exe):
     """Lance le script qui attend la fermeture, remplace l'exécutable et le relance."""
     exe = sys.executable
-    pid = os.getpid()
     bat = os.path.join(tempfile.gettempdir(), "catpilot_maj.bat")
     with open(bat, "w", encoding="mbcs" if sys.platform == "win32" else "utf-8") as f:
-        f.write(f"""@echo off
-:attente
-tasklist /FI "PID eq {pid}" 2>nul | find "{pid}" >nul && (timeout /t 1 /nobreak >nul & goto attente)
-set essai=0
+        f.write(_wait_lines() + f"""set essai=0
 :copie
 move /y "{new_exe}" "{exe}" >nul 2>&1 && goto relance
 set /a essai+=1
-if %essai% lss 10 (timeout /t 1 /nobreak >nul & goto copie)
-start "" "{exe}"
-goto fin
+if %essai% lss 20 (ping -n 2 127.0.0.1 >nul & goto copie)
 :relance
 start "" "{exe}"
-:fin
 del "%~f0"
 """)
-    flags = 0x08000000 | 0x00000008          # CREATE_NO_WINDOW | DETACHED_PROCESS
-    subprocess.Popen(["cmd", "/c", bat], creationflags=flags, close_fds=True)
+    spawn_detached(["cmd", "/c", bat])
