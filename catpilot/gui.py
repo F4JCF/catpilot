@@ -8,11 +8,12 @@ import time
 
 import serial.tools.list_ports
 from PySide6.QtCore import QPointF, QRectF, QSettings, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QFont, QFontMetrics, QKeySequence, QPainter, QPen, QShortcut
+from PySide6.QtGui import QAction, QActionGroup, QColor, QFont, QFontMetrics, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout,
     QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar,
     QPushButton, QSizePolicy, QSlider, QSpinBox, QToolBar, QVBoxLayout, QWidget,
+    QDialog, QDialogButtonBox, QRadioButton,
 )
 
 from . import __version__
@@ -25,6 +26,11 @@ from .propagation import FR as PROP_FR, Propagation
 from .updater import PAGE as RELEASES_PAGE, Updater, can_self_update, install_and_restart, is_newer
 from .rigctl_server import RigctlServer
 from .waterfall import Waterfall, guess_radio_input, list_inputs
+from .bandplan import BandPlanBar
+from .compact import CompactWindow
+from .geo import NmeaReader, from_locator, to_locator
+from .theme import THEMES, make_style
+from .voicekeyer import VoiceDock
 
 # --- données ----------------------------------------------------------------
 MODE_BUTTONS = [("USB", "USB"), ("LSB", "LSB"), ("CW", "CW"), ("CWR", "CW-R"),
@@ -40,7 +46,7 @@ BANDS = [  # nom, début, fin, fréquence par défaut (Région 1)
     ("17m", 18068000, 18168000, 18100000), ("15m", 21000000, 21450000, 21074000),
     ("12m", 24890000, 24990000, 24915000), ("10m", 28000000, 29700000, 28074000),
     ("6m", 50000000, 52000000, 50313000), ("2m", 144000000, 146000000, 144174000),
-    ("70cm", 430000000, 440000000, 432174000),
+    ("70cm", 430000000, 440000000, 432174000), ("23cm", 1240000000, 1300000000, 1296174000),
 ]
 STEPS = [("10 Hz", 10), ("100 Hz", 100), ("1 kHz", 1000), ("12,5 kHz", 12500), ("100 kHz", 100000)]
 
@@ -75,47 +81,19 @@ DEFAULT_PROFILES = {
 }
 
 AMBER, GREEN, RED, TEXT = "#f2b705", "#8cff3a", "#e5463b", "#e6e6e6"
+ARC_OK, NEEDLE, METER_BG = "#2fbf3a", "#ff4d2e", "#000"
+STYLE = make_style("jour", 1.0)
 
-STYLE = f"""
-QMainWindow, QWidget {{ background: #050505; color: {TEXT};
-    font-family: "Segoe UI", sans-serif; font-size: 9pt; }}
-QFrame#panel {{ background: #000; border: 1px solid #5a5a5a; border-radius: 3px; }}
-QLabel#ptitle {{ color: {AMBER}; font-weight: bold; font-size: 9.5pt; }}
-QLabel#freq {{ color: {GREEN}; background: #000; border: 2px solid #d0d0d0; border-radius: 3px;
-    font-family: Consolas, "DejaVu Sans Mono", monospace; font-size: 38pt; padding: 0 14px; }}
-QLabel#vfob {{ color: {GREEN}; background: #000; border: 2px solid #d0d0d0; border-radius: 3px;
-    font-family: Consolas, "DejaVu Sans Mono", monospace; font-size: 15pt; padding: 1px 10px; }}
-QLabel#info {{ color: {AMBER}; font-weight: bold; }}
-QLabel#value {{ color: {AMBER}; }}
-QLabel#hint {{ color: #8a8a8a; }}
-QPushButton {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #4a4a4a, stop:1 #262626);
-    border: 1px solid #1a1a1a; border-radius: 3px; padding: 4px 8px; min-height: 18px; color: {TEXT}; }}
-QPushButton:hover {{ background: #555; }}
-QPushButton:checked {{ border: 2px solid #f0f0f0; color: {GREEN}; background: #2a2a2a; }}
-QPushButton:disabled {{ color: #555; background: #181818; }}
-QPushButton#ptt {{ font-size: 13pt; font-weight: bold; min-height: 34px; }}
-QPushButton#ptt:checked {{ background: #a01d15; border-color: #ff6a5e; color: #fff; }}
-QSlider::groove:horizontal {{ height: 3px; background: #888; }}
-QSlider::groove:vertical {{ width: 3px; background: #888; }}
-QSlider::handle:horizontal {{ background: #1f8f2a; border: 1px solid #0b4d12; width: 11px; margin: -8px 0; border-radius: 3px; }}
-QSlider::handle:vertical {{ background: #1f8f2a; border: 1px solid #0b4d12; height: 11px; margin: 0 -8px; border-radius: 3px; }}
-QSlider::handle:disabled {{ background: #444; border-color: #333; }}
-QComboBox, QLineEdit, QSpinBox {{ background: #111; border: 1px solid #5a5a5a; border-radius: 3px; padding: 2px 6px; }}
-QComboBox QAbstractItemView {{ background: #111; selection-background-color: #333; }}
-QProgressBar {{ background: #111; border: 1px solid #444; border-radius: 2px; }}
-QProgressBar::chunk {{ background: {AMBER}; }}
-QTableWidget {{ background: #000; gridline-color: #333; color: {AMBER}; selection-background-color: #333; }}
-QHeaderView::section {{ background: #e8e8e8; color: #000; border: 1px solid #aaa; padding: 2px; }}
-QDockWidget {{ color: {AMBER}; font-weight: bold; }}
-QStatusBar {{ color: #bdbdbd; }}
-QToolBar {{ background: #0b0b0b; border-bottom: 1px solid #333; spacing: 6px; padding: 3px; }}
-QMenuBar {{ background: #0b0b0b; }}
-QMenuBar::item:selected, QMenu::item:selected {{ background: #333; }}
-QMenu {{ background: #111; border: 1px solid #444; }}
-QCheckBox {{ spacing: 6px; }}
-QCheckBox::indicator {{ width: 13px; height: 13px; border: 1px solid #aaa; background: #111; }}
-QCheckBox::indicator:checked {{ background: {GREEN}; }}
-"""
+
+def apply_theme(app, name="jour", scale=1.0):
+    """Change les couleurs de toute l'interface (feuille de style et aiguilles)."""
+    global AMBER, GREEN, RED, TEXT, ARC_OK, NEEDLE, METER_BG
+    c = THEMES.get(name, THEMES["jour"])
+    AMBER, GREEN, RED, TEXT = c["amber"], c["green"], c["red"], c["text"]
+    ARC_OK, NEEDLE, METER_BG = c["arc_ok"], c["needle"], c["panel"]
+    app.setStyleSheet(make_style(name, scale))
+    for w in app.allWidgets():
+        w.update()
 
 
 # --- widgets ------------------------------------------------------------------
@@ -160,8 +138,9 @@ class FreqDisplay(QLabel):
         txt = self.text()
         w = QFontMetrics(self.font()).horizontalAdvance(txt)
         idx = int((x - (self.width() - w) / 2) // (w / len(txt)))
-        p = self.PLACES.get(idx)
-        return None if p is None else 10 ** p
+        if not 0 <= idx < len(txt) or not txt[idx].isdigit() and txt[idx] != " ":
+            return None
+        return 10 ** sum(1 for c in txt[idx + 1:] if c.isdigit())
 
     def wheelEvent(self, e):
         n = e.angleDelta().y() // 120
@@ -198,7 +177,7 @@ class AnalogMeter(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         w, h = self.width(), self.height()
-        p.fillRect(self.rect(), QColor("#000"))
+        p.fillRect(self.rect(), QColor(METER_BG))
         cx, cy, r = w / 2, h * 1.45, h * 1.18
         a0, a1 = 132, 48
 
@@ -210,7 +189,7 @@ class AnalogMeter(QWidget):
 
         rect = QRectF(cx - r, cy - r, 2 * r, 2 * r)
         ar = a0 - (a0 - a1) * self.red_from
-        p.setPen(QPen(QColor("#2fbf3a"), 4, Qt.SolidLine, Qt.FlatCap))
+        p.setPen(QPen(QColor(ARC_OK), 4, Qt.SolidLine, Qt.FlatCap))
         p.drawArc(rect, int(ar * 16), int((a0 - ar) * 16))
         p.setPen(QPen(QColor(RED), 4, Qt.SolidLine, Qt.FlatCap))
         p.drawArc(rect, int(a1 * 16), int((ar - a1) * 16))
@@ -226,7 +205,7 @@ class AnalogMeter(QWidget):
             p.setPen(QColor(RED if f > self.red_from + 1e-6 else TEXT))
             q = pt(f, r + 21)
             p.drawText(QRectF(q.x() - 22, q.y() - 8, 44, 16), Qt.AlignCenter, label)
-        p.setPen(QPen(QColor("#ff4d2e"), 2.2, Qt.SolidLine, Qt.RoundCap))
+        p.setPen(QPen(QColor(NEEDLE), 2.2, Qt.SolidLine, Qt.RoundCap))
         p.drawLine(pt(self.value, r * 0.72), pt(self.value, r + 12))
         p.setPen(QColor(AMBER))
         p.drawText(QRectF(0, h - 20, w, 18), Qt.AlignCenter, self.title)
@@ -274,14 +253,25 @@ class MainWindow(QMainWindow):
         self.mem.visibilityChanged.connect(self.b_mems.setChecked)
         self.cw = CwDock(self)
         self.txa = TxAudioDock(self)
-        for dock, btn in ((self.cw, self.b_cw), (self.txa, self.b_txa)):
+        self.dvk = VoiceDock(self)
+        for dock, btn in ((self.cw, self.b_cw), (self.dvk, self.b_dvk), (self.txa, self.b_txa)):
             self.addDockWidget(Qt.RightDockWidgetArea, dock)
             self.tabifyDockWidget(self.mem, dock)
             dock.hide()
             btn.toggled.connect(dock.setVisible)
             dock.visibilityChanged.connect(btn.setChecked)
         self._build_toolbar_and_menus()
+        self.compact = CompactWindow(self, FreqDisplay, BANDS, MODE_LABELS)
+        self.compact.restore.connect(self.restore_from_compact)
+        self.nmea = NmeaReader()
+        self.nmea.position.connect(lambda la, lo: self.set_station(la, lo, "GPS NMEA"))
+        self.nmea.status.connect(self.statusBar().showMessage)
         self._load_settings()
+        self.act_night.setChecked(self.settings.value("night", "false") == "true")
+        scale = float(self.settings.value("text_scale", 1.0))
+        for a in self.size_group.actions():
+            a.setChecked(abs(a.data() - scale) < 0.01)
+        self.load_position()
         self._set_enabled(False)
         t = QTimer(self)
         t.timeout.connect(self.update_clients)
@@ -387,6 +377,8 @@ class MainWindow(QMainWindow):
         self.freq = FreqDisplay()
         self.freq.tune.connect(self.tune_by)
         vl.addWidget(self.freq)
+        self.bandplan = BandPlanBar(BANDS)
+        vl.addWidget(self.bandplan)
         h = QHBoxLayout()
         self.lb_mem = QLabel("VFO")
         self.lb_mem.setObjectName("info")
@@ -648,7 +640,9 @@ class MainWindow(QMainWindow):
         self.b_cw.setCheckable(True)
         self.b_txa = QPushButton("Audio TX")
         self.b_txa.setCheckable(True)
-        for b in (self.b_mems, self.b_cw, self.b_txa):
+        self.b_dvk = QPushButton("Messages vocaux")
+        self.b_dvk.setCheckable(True)
+        for b in (self.b_mems, self.b_cw, self.b_dvk, self.b_txa):
             ll.addWidget(b)
         lv.addLayout(ll)
         lo = QHBoxLayout()
@@ -721,6 +715,11 @@ class MainWindow(QMainWindow):
         s.setValue("profiles", json.dumps(self.profiles))
         self.mem.scanning = False
         self.cw.save_settings(s)
+        self.dvk.save_settings(s)
+        s.setValue("oob_cut", "true" if self.act_oob.isChecked() else "false")
+        s.setValue("night", "true" if self.act_night.isChecked() else "false")
+        s.setValue("text_scale", self.text_scale())
+        self.nmea.stop()
         s.setValue("wf_contrast", self.sl_contrast.value())
         s.setValue("wf_level", self.sl_level.value())
         self.wf.stop()
@@ -946,6 +945,13 @@ class MainWindow(QMainWindow):
         self.lb_utc.setToolTip("Heure UTC (heure locale entre parenthèses)")
         tb.addWidget(self.lb_utc)
         tb.addSeparator()
+        self.b_loc = QPushButton("Locator ?")
+        self.b_loc.setFlat(True)
+        self.b_loc.setStyleSheet("QPushButton { border: none; background: transparent; font-weight: bold; }")
+        self.b_loc.setToolTip("Position de la station. Clic : régler")
+        self.b_loc.clicked.connect(self.position_dialog)
+        tb.addWidget(self.b_loc)
+        tb.addSeparator()
         self.b_prop = QPushButton("Propagation…")
         self.b_prop.setFlat(True)
         self.b_prop.setStyleSheet("QPushButton { border: none; background: transparent; text-align: left; }")
@@ -975,20 +981,45 @@ class MainWindow(QMainWindow):
             m.addAction(a)
         aff = mb.addMenu("Affichage")
         for label, btn in (("Mémoires et scan", self.b_mems), ("CW au clavier", self.b_cw),
-                           ("Audio d'émission", self.b_txa)):
+                           ("Messages vocaux", self.b_dvk), ("Audio d'émission", self.b_txa)):
             a = QAction(label, self)
             a.triggered.connect(lambda _c=False, b=btn: b.setChecked(True))
             aff.addAction(a)
         a = QAction("Menus du poste…", self)
         a.triggered.connect(lambda: self.open_menu_editor(""))
         m.addAction(a)
+        m.addSeparator()
+        a = QAction("Position de la station…", self)
+        a.triggered.connect(self.position_dialog)
+        m.addAction(a)
+        self.act_oob = QAction("Couper l'émission hors des bandes amateurs", self, checkable=True)
+        self.act_oob.setChecked(self.settings.value("oob_cut", "true") == "true")
+        m.addAction(self.act_oob)
+
+        aff.addSeparator()
+        self.act_compact = QAction("Mode compact", self)
+        self.act_compact.setShortcut("Ctrl+K")
+        self.act_compact.triggered.connect(self.show_compact)
+        aff.addAction(self.act_compact)
+        self.act_night = QAction("Mode nuit", self, checkable=True)
+        self.act_night.setShortcut("Ctrl+N")
+        self.act_night.toggled.connect(lambda _on: self.apply_look())
+        aff.addAction(self.act_night)
+        sizes = aff.addMenu("Taille du texte")
+        self.size_group = QActionGroup(self)
+        for pct in (90, 100, 115, 130):
+            a = QAction(f"{pct} %", self, checkable=True)
+            a.setData(pct / 100)
+            a.triggered.connect(lambda _c=False: self.apply_look())
+            self.size_group.addAction(a)
+            sizes.addAction(a)
         h = mb.addMenu("Aide")
         a = QAction("Raccourcis clavier", self)
         a.triggered.connect(self.show_shortcuts)
         h.addAction(a)
         a = QAction("À propos de CAT Pilot", self)
         a.triggered.connect(lambda: QMessageBox.about(
-            self, "CAT Pilot", f"CAT Pilot {__version__}\nPilotage CAT FT-991A, FT-891 et IC-705\nF4JCF"))
+            self, "CAT Pilot", f"CAT Pilot {__version__}\nPilotage CAT de postes Yaesu et Icom\nF4JCF"))
         h.addAction(a)
 
         # Mise à jour, à côté de « Aide »
@@ -1027,6 +1058,8 @@ class MainWindow(QMainWindow):
         sc("Escape", self.escape)
         for i in range(5):
             sc(f"Alt+F{i + 1}", lambda n=i: self.cw.send(self.cw.macros[n].text()))
+        for i in range(4):
+            sc(f"Ctrl+F{i + 1}", lambda n=i: self.dvk.send(n))
 
     def show_shortcuts(self):
         QMessageBox.information(self, "Raccourcis clavier", (
@@ -1037,6 +1070,8 @@ class MainWindow(QMainWindow):
             "Ctrl + M : panneau des mémoires\n"
             "Ctrl + W : chute d'eau marche / arrêt\n"
             "Alt + F1 à F5 : messages CW programmables\n"
+            "Ctrl + F1 à F4 : messages vocaux\n"
+            "Ctrl + K : mode compact,  Ctrl + N : mode nuit\n"
             "Échap : arrêter le scan et la CW\n\n"
             "Molette sur un chiffre de la fréquence : régler ce chiffre.\n"
             "Bouton d'accord USB (ShuttleXpress, PowerMate…) : programmez-le dans son "
@@ -1236,8 +1271,11 @@ class MainWindow(QMainWindow):
             return
         self.setWindowTitle(f"CAT Pilot {__version__} — {drv.name if drv.name != 'Simulateur' else 'simulateur'}")
         maxf = getattr(drv, "max_freq", 470_000_000)
-        for name, lo, _hi, _d in BANDS:
-            self.band_buttons[name].setVisible(lo <= maxf)
+        minf = getattr(drv, "min_freq", 0)
+        for name, lo, hi, _d in BANDS:
+            self.band_buttons[name].setVisible(lo <= maxf and hi >= minf)
+        if hasattr(self, "compact"):
+            self.compact.fill_modes(drv.modes + (["C4FM"] if getattr(drv, "has_c4fm", False) else []))
         self.mode_buttons["C4FM"].setVisible(getattr(drv, "has_c4fm", True))
         for b in (self.b_qmb_sto, self.b_qmb_rcl):
             b.setVisible(getattr(drv, "has_qmb", True))
@@ -1249,10 +1287,122 @@ class MainWindow(QMainWindow):
             self.cb_audio.setToolTip("Ce poste n'a pas de carte son USB : choisissez l'entrée de votre "
                                      "interface audio (SCU-17, Signalink…)")
 
+    # --- apparence -------------------------------------------------------------------------
+    def text_scale(self):
+        a = self.size_group.checkedAction()
+        return a.data() if a else 1.0
+
+    def apply_look(self):
+        night = self.act_night.isChecked()
+        apply_theme(QApplication.instance(), "nuit" if night else "jour", self.text_scale())
+        self.bandplan.dim = night
+
+    def show_compact(self):
+        self.compact.show()
+        self.compact.raise_()
+        self.compact.on_state(self.ctrl.snapshot())
+        self.hide()
+
+    def restore_from_compact(self):
+        self.compact.hide()
+        self.show()
+        self.raise_()
+
+    # --- émission hors bande ------------------------------------------------------------------
+    def _check_out_of_band(self, st):
+        if not st.ptt:
+            self._oob_warned = False
+            return
+        if self.band_of(st.freq) or getattr(self, "_oob_warned", False):
+            return
+        self._oob_warned = True
+        QApplication.beep()
+        f = f"{st.freq / 1e6:.4f} MHz".replace(".", ",")
+        if self.act_oob.isChecked():
+            self.ctrl.set_ptt(False)
+            self.statusBar().showMessage(f"Émission coupée : {f} est hors des bandes amateurs "
+                                         "(option dans le menu Poste)")
+        else:
+            self.statusBar().showMessage(f"Attention : émission sur {f}, hors des bandes amateurs")
+
+    # --- position de la station ----------------------------------------------------------------
+    def set_station(self, lat, lon, source):
+        self.station = (lat, lon)
+        self.station_src = source
+        loc = to_locator(lat, lon)
+        self.b_loc.setText(loc + ("  GPS" if "GPS" in source else ""))
+        self.b_loc.setToolTip(f"{loc} — {lat:.4f}°, {lon:.4f}° ({source}). Clic : régler")
+
+    def load_position(self):
+        self.station, self.station_src = None, ""
+        loc = self.settings.value("my_locator", "")
+        try:
+            if loc:
+                self.set_station(*from_locator(loc), "locator saisi")
+        except ValueError:
+            pass
+        self.nmea.stop()
+        if self.settings.value("pos_source", "manuel") == "nmea":
+            port = self.settings.value("nmea_port", "")
+            if port:
+                self.nmea.start(port, int(self.settings.value("nmea_baud", 4800)))
+
+    def position_dialog(self):
+        d = QDialog(self)
+        d.setWindowTitle("Position de la station")
+        v = QVBoxLayout(d)
+        r_man = QRadioButton("Locator saisi")
+        ed = QLineEdit(self.settings.value("my_locator", ""))
+        ed.setPlaceholderText("ex. JN33LP")
+        r_rig = QRadioButton("GPS du poste (IC-705)")
+        r_nmea = QRadioButton("GPS NMEA sur un port COM (GPS USB, sortie GPS de l'IC-705…)")
+        cb_port = QComboBox()
+        for p in sorted(serial.tools.list_ports.comports(), key=lambda p: p.device):
+            cb_port.addItem(f"{p.device} — {p.description}", p.device)
+        i = cb_port.findData(self.settings.value("nmea_port", ""))
+        if i >= 0:
+            cb_port.setCurrentIndex(i)
+        cb_baud = QComboBox()
+        cb_baud.addItems(["4800", "9600", "38400", "115200"])
+        cb_baud.setCurrentText(str(self.settings.value("nmea_baud", "4800")))
+        src = self.settings.value("pos_source", "manuel")
+        {"manuel": r_man, "poste": r_rig, "nmea": r_nmea}.get(src, r_man).setChecked(True)
+        v.addWidget(r_man)
+        v.addWidget(ed)
+        v.addWidget(r_rig)
+        v.addWidget(r_nmea)
+        h = QHBoxLayout()
+        h.addWidget(cb_port, 1)
+        h.addWidget(cb_baud)
+        v.addLayout(h)
+        t = QLabel("Le locator saisi sert aussi de position de secours quand le GPS n'a pas de position.")
+        t.setObjectName("hint")
+        t.setWordWrap(True)
+        v.addWidget(t)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(d.accept)
+        bb.rejected.connect(d.reject)
+        v.addWidget(bb)
+        if d.exec() != QDialog.Accepted:
+            return
+        loc = ed.text().strip()
+        if loc:
+            try:
+                from_locator(loc)
+            except ValueError:
+                QMessageBox.warning(self, "Position", f"« {loc} » n'est pas un locator valide (ex. JN33LP).")
+                return
+        self.settings.setValue("my_locator", loc)
+        self.settings.setValue("pos_source", "poste" if r_rig.isChecked() else "nmea" if r_nmea.isChecked() else "manuel")
+        self.settings.setValue("nmea_port", cb_port.currentData() or "")
+        self.settings.setValue("nmea_baud", cb_baud.currentText())
+        self.load_position()
+
     def escape(self):
         if self.mem.scanning:
             self.mem.b_scan.setChecked(False)
         self.cw.stop()
+        self.dvk.stop()
 
     def open_menu_editor(self, flt):
         if not self.ctrl.connected:
@@ -1451,6 +1601,11 @@ class MainWindow(QMainWindow):
             return
         self._last = st
         self._state_time = time.monotonic()
+        self.bandplan.set_freq(st.freq, st.ptt)
+        self._check_out_of_band(st)
+        gps = st.p.get("gps")
+        if gps and self.settings.value("pos_source", "manuel") == "poste":
+            self.set_station(gps[0], gps[1], "GPS du poste")
         self._track_band_power(st)
         self._updating = True
         try:
@@ -1541,5 +1696,6 @@ def main():
     app.setApplicationName("CAT Pilot")
     app.setStyleSheet(STYLE)
     w = MainWindow()
+    w.apply_look()
     w.show()
     sys.exit(app.exec())

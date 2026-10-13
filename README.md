@@ -1,4 +1,4 @@
-# CAT Pilot 0.8 — Yaesu FT-991A, FT-891 et Icom IC-705
+# CAT Pilot 0.9 — Yaesu FT-991A, FT-891 et Icom IC-705
 
 Logiciel de pilotage CAT des Yaesu FT-991A, FT-891 et de l'Icom IC-705 sous Windows, avec partage du CAT
 vers WSJT-X, JTDX, Log4OM, N1MM… grâce à un serveur compatible rigctld.
@@ -104,6 +104,30 @@ Le poste « Simulateur » permet de tout essayer sans radio.
 - Même interface ; 2 m, 70 cm et C4FM sont masqués. Le FT-891 n'a pas de carte
   son USB : pour la chute d'eau et l'enregistrement, choisir l'entrée d'une
   interface audio externe (SCU-17…). Menus en groupe-item (05-06 = CAT RATE).
+
+### Affichage (menu « Affichage »)
+- **Plan de bandes** sous la fréquence : segments IARU Région 1 (CW, numérique,
+  BLU, balises, relais, satellites…) et repère de fréquence, à titre indicatif.
+- **Émission hors bande** : si le poste émet hors des bandes amateurs, l'émission
+  est coupée (option dans le menu Poste) ou signalée.
+- **Mode nuit** (Ctrl+N) : tout en rouge sombre pour le portable de nuit.
+- **Taille du texte** : 90 à 130 %.
+- **Mode compact** (Ctrl+K) : petite fenêtre (fréquence, bande, mode, S-mètre,
+  MOX), éventuellement au premier plan, à garder à côté de WSJT-X.
+
+### Position de la station (menu Poste ou clic sur le locator)
+- Locator saisi, GPS intégré de l'IC-705, ou GPS NMEA sur un port COM (GPS USB,
+  sortie GPS de l'IC-705 sur son 2e port COM). Le locator s'affiche dans la barre
+  du haut ; il servira aux spots, aux satellites et au rotor.
+
+### Messages vocaux (bouton « Messages vocaux »)
+- 6 messages enregistrés au micro du PC (« CQ CQ de… »), renommables, émis d'un
+  clic ou par Ctrl+F1 à F4. CAT Pilot passe en émission, joue le message sur la
+  sortie audio USB du poste, puis repasse en réception.
+- Par défaut le mode bascule en DATA pendant le message, pour que le poste prenne
+  sa modulation sur l'USB, puis revient au mode d'origine.
+- Appel en boucle : « Répéter toutes les N s ». Échap ou Stop arrêtent tout.
+- Régler le niveau pour que l'ALC bouge à peine.
 
 ### Mise à jour (menu « Mise à jour », à côté de « Aide »)
 - « Vérifier les mises à jour… » consulte la dernière version publiée sur

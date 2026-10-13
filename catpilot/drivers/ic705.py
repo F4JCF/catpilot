@@ -15,7 +15,7 @@ from .base import RigDriver, RigError, RigRefused, RigTimeout, interp, s_text_fr
 from .ft991a import SM_CAL, SWR_CAL
 
 CIV_ADDR = 0xA4
-HAS_SUB = {0x07, 0x14, 0x15, 0x16, 0x1A, 0x1B, 0x1C, 0x21, 0x25}  # commandes à sous-commande
+HAS_SUB = {0x07, 0x14, 0x15, 0x16, 0x1A, 0x1B, 0x1C, 0x21, 0x23, 0x25}  # commandes à sous-commande
 CTRL = 0xE0
 
 ICOM_MODE = {"LSB": 0x00, "USB": 0x01, "AM": 0x02, "CW": 0x03, "RTTY": 0x04, "FM": 0x05,
@@ -43,6 +43,25 @@ def bcd(n, nbytes, little=True):
 def unbcd(data, little=True):
     seq = reversed(data) if little else data
     return int("".join(f"{x:02X}" for x in seq) or "0")
+
+
+def decode_position(d):
+    """Position CI-V (23 00 / 23 02) : latitude sur 5 octets, longitude sur 6 (BCD)."""
+    if len(d) < 11 or d[:5] == b"\xff" * 5:
+        return None
+    h_lat, h_lon = d[:5].hex(), d[5:11].hex()
+    try:
+        lat = int(h_lat[0:2]) + float(f"{h_lat[2:4]}.{h_lat[4:7]}") / 60
+        lon = int(h_lon[1:4]) + float(f"{h_lon[4:6]}.{h_lon[6:9]}") / 60
+    except ValueError:
+        return None
+    if h_lat[9] == "0":
+        lat = -lat
+    if h_lon[11] == "0":
+        lon = -lon
+    if not (abs(lat) <= 90 and abs(lon) <= 180) or (lat == 0 and lon == 0):
+        return None
+    return lat, lon
 
 
 def _db_to_yaesu_raw(db):
@@ -82,13 +101,14 @@ class IC705(RigDriver):
     has_c4fm = False
     has_qmb = False
     has_usb_audio = True            # codec USB intégré (« USB Audio CODEC »)
+    has_gps = True
     menu_skip = set()
 
     def __init__(self, *a):
         super().__init__(*a)
         self.addr = CIV_ADDR
         self._keys = list(LEVELS) + list(FUNCS) + ["pwr", "att", "pre", "agc", "bkin", "atu",
-                                                   "split_dup", "vfob", "tone_mode", "tone", "rit"]
+                                                   "split_dup", "vfob", "tone_mode", "tone", "rit", "gps"]
         self._slow = 0
         self._fails = {}
         self.unsupported = {}
@@ -247,6 +267,8 @@ class IC705(RigDriver):
                 d = self._cmd([0x1B, 0x00])[-3:]
                 hz = unbcd(d, little=False) / 10
                 p["tone"] = min(range(len(CTCSS)), key=lambda i: abs(CTCSS[i] - hz))
+            elif key == "gps":
+                p["gps"] = decode_position(self._cmd([0x23, 0x00]))
             elif key == "rit":
                 d = self._cmd([0x21, 0x00])
                 hz = unbcd(d[:2])
