@@ -1,6 +1,7 @@
 name: Construire l'exécutable Windows
 on:
   push:
+    branches: [main]
   workflow_dispatch:
 jobs:
   build:
