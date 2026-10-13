@@ -52,6 +52,7 @@ class CwDecoder:
         self.dit, self.dah = 0.060, 0.180   # durées moyennes point / trait (s), 20 mots/min au départ
         self._marks = collections.deque(maxlen=24)
         self._locked = False
+        self._tone_t = -99.0           # dernier instant (s) où une note CW a été repérée
         self._sym = ""
         self._char_done = True
         self._word_done = True
@@ -100,7 +101,7 @@ class CwDecoder:
     def _track_freq(self, x):
         self._buf = np.concatenate([self._buf, x])[-int(self.sr * 1.0):]
         self._since_fft += len(x) / self.sr
-        if not self.auto or self._since_fft < 0.4 or len(self._buf) < self.sr * 0.5:
+        if self._since_fft < 0.4 or len(self._buf) < self.sr * 0.5:
             return
         self._since_fft = 0.0
         n = len(self._buf)
@@ -110,10 +111,21 @@ class CwDecoder:
         if not band.any():
             return
         sb, fb = spec[band], freqs[band]
+        med = np.median(sb) + 1e-12
+        now = self._n / self.sr
+        if not self.auto:                                 # note imposée : y a-t-il un signal dessus ?
+            near = np.abs(fb - self.pitch) < 40
+            if near.any() and sb[near].max() >= 5 * med:
+                self._tone_t = now
+            return
+        near = np.abs(fb - self.freq) < 40
+        if self._locked and near.any() and sb[near].max() >= 5 * med:
+            self._tone_t = now                            # la note suivie est toujours là
         i = int(np.argmax(sb))
-        if sb[i] < 8 * (np.median(sb) + 1e-12):          # rien qui dépasse nettement le bruit
+        if sb[i] < 8 * med:                               # rien qui dépasse nettement le bruit
             return
         fpk = float(fb[i])
+        self._tone_t = now
         if not self._locked:
             self.freq, self._locked, self._cand = fpk, True, None
             self.noise = self.peak = None
@@ -158,6 +170,9 @@ class CwDecoder:
         self._dur += STEP
         if not self.key:
             out = self._check_gap()
+            # sans note CW repérée depuis 6 s, c'est du bruit : on n'affiche rien
+            if out and (self._n / self.sr) - self._tone_t >= 6.0:
+                out = ""
         return out
 
     def _mark(self, d):

@@ -199,8 +199,21 @@ class CwDock(QDockWidget):
             self.bar.setValue(0)
             self.lb_dec.setText("")
 
+    def _transmitting(self):
+        st = self.ctrl.snapshot() if self.ctrl.connected else None
+        return bool((st and st.ptt) or (self.keyer and self.keyer.busy) or self.queue
+                    or self.timer.isActive())
+
     def _feed(self, x, sr):
         self.decoder.pitch = float(self.win.wf.marker or 700)
+        if self._transmitting():           # pendant l'émission, l'audio reçu n'a pas de sens
+            self._tx_hold = 4               # et on attend encore un peu après
+            return
+        if getattr(self, "_tx_hold", 0):
+            self._tx_hold -= 1
+            if not self._tx_hold:
+                self.decoder.reset()
+            return
         txt = self.decoder.feed(x, sr)
         if txt:
             self.rx.moveCursor(QTextCursor.End)
@@ -211,7 +224,11 @@ class CwDock(QDockWidget):
         d = self.decoder
         f = d.freq if d.auto else d.pitch
         self.win.wf.cw_marker = f
-        ok = d.snr >= 9
+        if getattr(self, "_tx_hold", 0) or self._transmitting():
+            self.bar.setValue(0)
+            self.lb_dec.setText("en pause pendant l'émission")
+            return
+        ok = d.snr >= 9 and (d._n / max(1, d.sr)) - d._tone_t < 6.0
         self.bar.setValue(int(d.level * 100) if ok and d.key else 0)
         self.lb_dec.setText(f"{f:.0f} Hz · {d.wpm} mots/min · {d.snr:.0f} dB" if ok
                             else f"{f:.0f} Hz · pas de signal CW")

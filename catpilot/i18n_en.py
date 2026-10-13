@@ -236,7 +236,7 @@ EXACT = {
     "Exporter en ADIF": "Export to ADIF", "Import ADIF": "ADIF import", "Activation": "Activation",
     "Indiquez votre référence dans « Ma réf. (activation) ».": "Enter your reference in \"My ref. (activation)\".",
     "Réception : décodeur CW (audio USB du poste, comme la chute d'eau)": "Receive: CW decoder (radio USB audio, like the waterfall)",
-    "Décoder": "Decode", "Note auto": "Auto tone",
+    "Décoder": "Decode", "en pause pendant l'émission": "paused while transmitting", "Note auto": "Auto tone",
     "Décoder le morse reçu. Lance la chute d'eau si besoin.": "Decode received Morse. Starts the waterfall if needed.",
     "Coché : suit le signal CW le plus fort (300 à 1500 Hz).\nDécoché : décode sur la tonalité CW du poste (PITCH) ;\nun clic sur un signal dans la chute d'eau l'y amène.":
         "Checked: follows the strongest CW signal (300 to 1500 Hz).\nUnchecked: decodes on the radio's CW pitch;\nclicking a signal in the waterfall brings it there.",
