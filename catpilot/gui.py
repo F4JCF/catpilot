@@ -10,6 +10,7 @@ import serial.tools.list_ports
 from PySide6.QtCore import QPointF, QRectF, QSettings, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup, QColor, QFont, QFontMetrics, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
+    QProxyStyle, QStyle,
     QApplication, QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout,
     QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar,
     QPushButton, QSizePolicy, QSlider, QSpinBox, QToolBar, QVBoxLayout, QWidget,
@@ -105,6 +106,32 @@ def apply_theme(app, name="jour", scale=1.0):
 
 
 # --- widgets ------------------------------------------------------------------
+class MenuBarStyle(QProxyStyle):
+    """Dessine en orange le titre du menu « Mise à jour » quand une version est disponible."""
+    ORANGE = QColor("#ff8c1a")
+
+    def __init__(self):
+        super().__init__()
+        self.highlight_menu = None
+
+    def drawControl(self, element, option, painter, widget=None):
+        menu = self.highlight_menu
+        if element == QStyle.CE_MenuBarItem and menu is not None and option.text == menu.title():
+            painter.save()
+            r = option.rect
+            if option.state & QStyle.State_Selected:
+                painter.fillRect(r, QColor(255, 140, 26, 60))
+            f = QFont(painter.font())
+            f.setBold(True)
+            painter.setFont(f)
+            painter.setPen(self.ORANGE)
+            painter.drawText(r, Qt.AlignCenter | Qt.TextShowMnemonic, option.text)
+            painter.restore()
+            return
+        super().drawControl(element, option, painter, widget)
+
+
+
 class Panel(QFrame):
     """Cadre noir avec titre en bas, à la manière d'une face avant."""
 
@@ -1119,6 +1146,8 @@ class MainWindow(QMainWindow):
         self._upd_dialog = None
         self._restart_for_update = False
         self.menu_upd = mb.addMenu("Mise à jour")
+        self.mb_style = MenuBarStyle()
+        mb.setStyle(self.mb_style)
         a = QAction("Vérifier les mises à jour…", self)
         a.triggered.connect(lambda: self.upd.check(manual=True))
         self.menu_upd.addAction(a)
@@ -1630,6 +1659,12 @@ class MainWindow(QMainWindow):
         btn.blockSignals(False)
 
     # --- mises à jour ------------------------------------------------------------------------
+    def set_update_flag(self, available, version=""):
+        """Titre « Mise à jour » en orange tant qu'une nouvelle version attend."""
+        self.mb_style.highlight_menu = self.menu_upd if available else None
+        self.menu_upd.menuAction().setToolTip(f"Nouvelle version disponible : {version}" if available else "")
+        self.menuBar().update()
+
     def open_releases_page(self):
         from PySide6.QtCore import QUrl
         from PySide6.QtGui import QDesktopServices
@@ -1642,15 +1677,15 @@ class MainWindow(QMainWindow):
                                     f"Impossible de vérifier les mises à jour.\n\n{info}")
             return
         if not is_newer(info["version"]):
-            self.menu_upd.setTitle("Mise à jour")
+            self.set_update_flag(False)
             if manual:
                 QMessageBox.information(self, "Mise à jour",
                                         f"Vous avez déjà la dernière version ({__version__}).")
             return
         if not manual and self.settings.value("update_skip", "") == info["version"]:
-            self.menu_upd.setTitle("Mise à jour ●")
+            self.set_update_flag(True, info["version"])
             return
-        self.menu_upd.setTitle("Mise à jour ●")
+        self.set_update_flag(True, info["version"])
         self.statusBar().showMessage(f"Nouvelle version disponible : {info['version']}")
         notes = info["notes"].strip()
         if len(notes) > 900:
