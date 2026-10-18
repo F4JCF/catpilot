@@ -680,7 +680,7 @@ class SpotsDock(QDockWidget):
 
     # --- Reverse Beacon Network ---------------------------------------------------------
     def toggle_rbn(self, on):
-        call = (self.win.settings.value("mycall", "") or "").strip().upper()
+        call = cty.base_call((self.win.settings.value("mycall", "") or "").strip().upper())
         if on and not call:
             self.lb_me.setText("Indiquez votre indicatif (menu Carnet > Réglages)")
             self.b_rbn.blockSignals(True)
@@ -801,7 +801,7 @@ class SpotsDock(QDockWidget):
     def toggle_cluster(self, on):
         if on:
             host, _, port = (self.ed_host.text().strip().split() or [""])[0].rpartition(":")
-            call = (self.win.settings.value("mycall", "") or "").strip().upper()
+            call = cty.base_call((self.win.settings.value("mycall", "") or "").strip().upper())
             if not host or not port.isdigit():
                 self.lb_status.setText("Adresse du cluster au format hôte:port")
                 self._uncheck()

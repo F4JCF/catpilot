@@ -1,4 +1,3 @@
-Nouveautés de la 0.23.1 :
-- DX cluster : liste déroulante de clusters (VE7CC, DXFun, W3LPL, NC7J, GB7MBC, K3LR, RBN) ; on peut toujours taper une autre adresse.
-- L'onglet « Main courante » s'appelle « ADRASEC MC » et se trouve tout à droite, après « Panoramique ».
-- Main courante : suppression d'un message (bouton « Supprimer le message », clic droit ou touche Suppr), avec confirmation. Les numéros des autres messages ne changent pas et ne sont jamais réutilisés.
+Nouveautés de la 0.23.2 :
+- Plusieurs indicatifs : en haut du carnet, « Je trafique en » permet de choisir l'indicatif des prochains QSO (F4JCF, F4JCF/P, FR/F4JCF/P, TK/F4JCF…). Tapez-en un nouveau puis Entrée pour l'ajouter à la liste ; « Retirer » l'enlève. Le sens est rappelé à côté (portable, mobile, depuis La Réunion…).
+- L'indicatif choisi sert pour le carnet (station), les messages CW, les étiquettes QSL et PSK Reporter ; le DX cluster et le RBN utilisent l'indicatif principal. Il s'affiche en bas de la fenêtre.

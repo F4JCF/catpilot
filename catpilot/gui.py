@@ -1825,6 +1825,40 @@ class MainWindow(QMainWindow):
         self.logdock.raise_()
         self.logdock.ed_call.setFocus()
 
+    def set_active_call(self, call):
+        """Indicatif utilisé pour les prochains QSO (F4JCF, F4JCF/P, FR/F4JCF/P…), mémorisé dans la liste."""
+        import json
+        from .logbook import CALL_RE, my_calls
+        call = (call or "").strip().upper().replace(" ", "")
+        if not call:
+            return
+        if not CALL_RE.match(call):
+            QMessageBox.warning(self, "Indicatif", f"« {call} » ne ressemble pas à un indicatif "
+                                "(exemples : F4JCF, F4JCF/P, FR/F4JCF/P).")
+            self.logdock.fill_mycalls()
+            return
+        s = self.settings
+        calls = my_calls(s)
+        if call not in calls:
+            calls.append(call)
+        s.setValue("mycalls", json.dumps(calls))
+        s.setValue("mycall", call)
+        self.cw.ed_mycall.setText(call)
+        self.logdock.fill_mycalls()
+        self.statusBar().showMessage(f"Prochains QSO enregistrés avec l'indicatif {call}", 8000)
+
+    def remove_call(self, call):
+        import json
+        from .logbook import my_calls
+        call = (call or "").strip().upper()
+        s = self.settings
+        calls = [c for c in my_calls(s) if c != call]
+        s.setValue("mycalls", json.dumps(calls))
+        if (s.value("mycall", "") or "").upper() == call:
+            s.setValue("mycall", calls[0] if calls else "")
+            self.cw.ed_mycall.setText(calls[0] if calls else "")
+        self.logdock.fill_mycalls()
+
     def qsl_labels(self, recs=None):
         from .qslprint import LabelDialog
         LabelDialog(self, recs).exec()
@@ -1843,7 +1877,8 @@ class MainWindow(QMainWindow):
         if d.exec() != QDialog.Accepted:
             return
         s = self.settings
-        s.setValue("mycall", d.ed_call.text().strip().upper())
+        if d.ed_call.text().strip():
+            self.set_active_call(d.ed_call.text())
         s.setValue("hamqth_user", d.ed_user.text().strip())
         s.setValue("hamqth_pass", d.ed_pass.text())
         self.logdock.hamqth.user = d.ed_user.text().strip()

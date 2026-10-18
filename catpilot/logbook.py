@@ -410,6 +410,43 @@ class PhotoLoader(QObject):
             pass
 
 
+CALL_RE = re.compile(r"^([A-Z0-9]{1,4}/)?[A-Z0-9]{1,3}[0-9][A-Z0-9]{0,4}[A-Z](/[A-Z0-9]{1,4})*$")
+
+
+def my_calls(s):
+    import json
+    try:
+        calls = json.loads(s.value("mycalls", "[]") or "[]")
+    except ValueError:
+        calls = []
+    cur = (s.value("mycall", "") or "").upper()
+    if cur and cur not in calls:
+        calls.insert(0, cur)
+    return calls
+
+
+def describe_mycall(call):
+    """« portable, depuis La Réunion » : ce que veut dire l'indicatif choisi."""
+    if not call:
+        return "indiquez votre indicatif"
+    parts = call.split("/")
+    notes = []
+    suffix = {"P": "portable", "M": "mobile", "MM": "maritime mobile", "AM": "aéronautique mobile",
+              "QRP": "QRP", "A": "autre adresse"}
+    for p in parts[1:]:
+        if p in suffix:
+            notes.append(suffix[p])
+    try:
+        from .qsl import country_of
+        _iso, country = country_of(call)
+        _iso0, home = country_of(max(parts, key=len))
+        if country and country != home:
+            notes.append(f"depuis {country}")
+    except Exception:
+        pass
+    return " · ".join(notes)
+
+
 def full_name(name):
     """« MARC DUPONT » ou « marc dupont » -> « Marc Dupont » ; un nom déjà écrit proprement est gardé."""
     name = " ".join((name or "").split())
@@ -591,6 +628,26 @@ class LogDock(QDockWidget):
 
         w = QWidget()
         v = QVBoxLayout(w)
+        hm = QHBoxLayout()
+        hm.addWidget(QLabel("Je trafique en"))
+        self.cb_mycall = QComboBox()
+        self.cb_mycall.setEditable(True)
+        self.cb_mycall.setMinimumWidth(180)
+        self.cb_mycall.setToolTip("Votre indicatif pour les prochains QSO : F4JCF, F4JCF/P, FR/F4JCF/P…\n"
+                                  "Tapez-en un nouveau puis Entrée pour l'ajouter à la liste.")
+        self.cb_mycall.lineEdit().setPlaceholderText("mon indicatif")
+        self.fill_mycalls()
+        self.cb_mycall.activated.connect(lambda _i: self.win.set_active_call(self.cb_mycall.currentText()))
+        self.cb_mycall.lineEdit().returnPressed.connect(lambda: self.win.set_active_call(self.cb_mycall.currentText()))
+        hm.addWidget(self.cb_mycall)
+        b = QPushButton("Retirer")
+        b.setToolTip("Retirer cet indicatif de la liste")
+        b.clicked.connect(lambda: self.win.remove_call(self.cb_mycall.currentText()))
+        hm.addWidget(b)
+        self.lb_mycall = QLabel("")
+        self.lb_mycall.setObjectName("hint")
+        hm.addWidget(self.lb_mycall, 1)
+        v.addLayout(hm)
         g = QGridLayout()
         self.ed_call = QLineEdit()
         self.ed_call.setPlaceholderText("Indicatif, puis Entrée")
@@ -835,6 +892,18 @@ class LogDock(QDockWidget):
         else:
             self.lb_info.setText(head + ("Nouvel indicatif" if len(txt.strip()) >= 3 else ""))
         self._lookup_timer.start()
+
+    def fill_mycalls(self):
+        s = self.win.settings
+        cur = (s.value("mycall", "") or "").upper()
+        calls = my_calls(s)
+        self.cb_mycall.blockSignals(True)
+        self.cb_mycall.clear()
+        self.cb_mycall.addItems(calls)
+        self.cb_mycall.setCurrentText(cur)
+        self.cb_mycall.blockSignals(False)
+        if hasattr(self, "lb_mycall"):
+            self.lb_mycall.setText(describe_mycall(cur))
 
     def _sig_changed(self, text, ed, who):
         on = text not in ("", "Aucune")

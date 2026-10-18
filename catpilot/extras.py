@@ -251,6 +251,9 @@ class StatusInfo:
     def refresh(self):
         w = self.win
         parts = []
+        me = (w.settings.value("mycall", "") or "").upper()
+        if me:
+            parts.append(me)
         st = w._last
         if st and w.ctrl.connected:
             from .gui import MODE_LABELS
