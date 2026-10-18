@@ -102,7 +102,7 @@ def apply_theme(app, name="jour", scale=1.0):
     global AMBER, GREEN, RED, TEXT, ARC_OK, NEEDLE, METER_BG
     c = THEMES.get(name, THEMES["jour"])
     AMBER, GREEN, RED, TEXT = c["amber"], c["green"], c["red"], c["text"]
-    ARC_OK, NEEDLE, METER_BG = c["arc_ok"], c["needle"], c["panel"]
+    ARC_OK, NEEDLE, METER_BG = c["arc_ok"], c["needle"], c.get("meter_bg", c["panel"])
     app.setStyleSheet(make_style(name, scale))
     for w in app.allWidgets():
         w.update()
@@ -145,7 +145,8 @@ class Panel(QFrame):
         outer.setContentsMargins(8, 8, 8, 4)
         outer.setSpacing(4)
         self.body = QWidget()
-        self.body.setStyleSheet("background: transparent;")
+        self.body.setObjectName("pbody")
+        self.body.setStyleSheet("QWidget#pbody, QWidget#pbody .QWidget { background: transparent; }")
         outer.addWidget(self.body, 1)
         t = QLabel(title)
         t.setObjectName("ptitle")
@@ -412,6 +413,7 @@ class MainWindow(QMainWindow):
             b.clicked.connect(lambda _c=False, n=name: self.goto_band(n))
             self.band_group.addButton(b)
             self.band_buttons[name] = b
+            b.setObjectName("bigkey")
             bl.addWidget(b, i // 4, i % 4)
         g.addWidget(pb, 0, 0)
 
@@ -571,6 +573,7 @@ class MainWindow(QMainWindow):
             b.clicked.connect(lambda _c=False, m=mode: self.ctrl.set_mode(m))
             self.mode_group.addButton(b)
             self.mode_buttons[mode] = b
+            b.setObjectName("bigkey")
             mo.addWidget(b, i // 3, i % 3)
         g.addWidget(pmo, 1, 0)
 
@@ -1126,6 +1129,15 @@ class MainWindow(QMainWindow):
         self.act_night.setShortcut("Ctrl+N")
         self.act_night.toggled.connect(lambda _on: self.apply_look())
         aff.addAction(self.act_night)
+        themes = aff.addMenu("Thème")
+        self.theme_group = QActionGroup(self)
+        from .theme import THEME_NAMES
+        for code, label in THEME_NAMES.items():
+            a = QAction(label, self, checkable=True)
+            a.setChecked((self.settings.value("theme", "bleu") or "bleu") == code)
+            a.triggered.connect(lambda _c=False, t=code: (self.settings.setValue("theme", t), self.apply_look()))
+            self.theme_group.addAction(a)
+            themes.addAction(a)
         langs = aff.addMenu("Langue")
         self.lang_group = QActionGroup(self)
         from .i18n import LANGS
@@ -1527,7 +1539,8 @@ class MainWindow(QMainWindow):
 
     def apply_look(self):
         night = self.act_night.isChecked()
-        apply_theme(QApplication.instance(), "nuit" if night else "jour", self.text_scale())
+        theme = self.settings.value("theme", "bleu") or "bleu"
+        apply_theme(QApplication.instance(), "nuit" if night else theme, self.text_scale())
         self.bandplan.dim = night
 
     def change_language(self, code):
