@@ -22,7 +22,8 @@ FIELDS = ["call", "qso_date", "time_on", "freq", "band", "mode", "submode", "rst
           "name", "qth", "gridsquare", "sig", "sig_info", "my_sig", "my_sig_info", "comment",
           "tx_pwr", "my_gridsquare", "station_callsign", "operator", "country",
           "contest_id", "stx", "srx", "stx_string", "srx_string",
-          "qsl_via", "eqsl_qsl_rcvd", "eqsl_qslrdate", "lotw_qsl_rcvd", "lotw_qslrdate"]
+          "qsl_via", "eqsl_qsl_rcvd", "eqsl_qslrdate", "lotw_qsl_rcvd", "lotw_qslrdate",
+          "qsl_sent", "qsl_rcvd", "qsl_sent_via", "qslsdate", "qslrdate"]
 # Champs propres aux confirmations : jamais envoyés aux carnets en ligne
 QSL_FIELDS = ("eqsl_qsl_rcvd", "eqsl_qslrdate", "lotw_qsl_rcvd", "lotw_qslrdate")
 
@@ -48,6 +49,7 @@ def data_dir():
 
 
 UP_COLS = ("up_qrz", "up_eqsl", "up_clublog", "up_lotw")
+EXTRA_COLS = ("audio_file",)          # colonnes propres à CAT Pilot (hors ADIF)
 
 
 class Log(QObject):
@@ -64,7 +66,7 @@ class Log(QObject):
         with self.lock:
             self.db.execute(f"CREATE TABLE IF NOT EXISTS qso (id INTEGER PRIMARY KEY, {cols})")
             have = {r[1] for r in self.db.execute("PRAGMA table_info(qso)")}
-            for f in FIELDS + list(UP_COLS):
+            for f in FIELDS + list(UP_COLS) + list(EXTRA_COLS):
                 if f not in have:
                     self.db.execute(f"ALTER TABLE qso ADD COLUMN {f} TEXT")
                     if f in UP_COLS:          # les QSO déjà présents ne sont pas envoyés d'office
@@ -121,15 +123,17 @@ class Log(QObject):
             return {c[3:]: self.db.execute(f"SELECT COUNT(*) FROM qso WHERE {c} IS NULL OR {c} = ''").fetchone()[0]
                     for c in UP_COLS}
 
-    def update(self, qid, rec):
-        rec = {k: (str(v).strip() if v is not None else "") for k, v in rec.items() if k in FIELDS}
+    def update(self, qid, rec, notify=True):
+        rec = {k: (str(v).strip() if v is not None else "") for k, v in rec.items()
+               if k in FIELDS or k in EXTRA_COLS}
         if not rec:
             return
         with self.lock:
             self.db.execute(f"UPDATE qso SET {', '.join(k + ' = ?' for k in rec)} WHERE id = ?",
                             list(rec.values()) + [qid])
             self.db.commit()
-        self.changed.emit()
+        if notify:
+            self.changed.emit()
 
     def delete(self, qid):
         with self.lock:
@@ -154,7 +158,7 @@ class Log(QObject):
         return False
 
     def query(self, where="1", args=(), limit=None):
-        cols = FIELDS + list(UP_COLS)
+        cols = FIELDS + list(UP_COLS) + list(EXTRA_COLS)
         sql = f"SELECT id, {', '.join(cols)} FROM qso WHERE {where} ORDER BY qso_date DESC, time_on DESC"
         if limit:
             sql += f" LIMIT {int(limit)}"
@@ -258,7 +262,7 @@ class HamQTH(QObject):
             return {"name": full_name(" ".join(x for x in (f("fname"), f("name")) if x)) or f("nickname"),
                     "qth": qth, "country": f("country"), "grid": f("grid"), "itu": f("ituzone"),
                     "cq": f("cqzone"), "lat": f("lat"), "lon": f("lon"), "qsl_via": f("qslmgr"),
-                    "lotw": f("lotw") == "1", "eqsl": f("eqsl") == "1", "src": "QRZ.com"}, None
+                    "lotw": f("lotw") == "1", "eqsl": f("eqsl") == "1", "photo": f("image"), "src": "QRZ.com"}, None
         return None, None
 
     def _hamqth(self, call):
@@ -279,6 +283,7 @@ class HamQTH(QObject):
                 return None, (None if "not found" in err.lower() else f"HamQTH : {err}")
             info = {k: self._text(root, k) for k in
                     ("nick", "adr_name", "qth", "country", "grid", "itu", "cq", "lat", "lon", "qsl_via")}
+            info["photo"] = self._text(root, "picture")
             info["lotw"] = self._text(root, "lotw").upper() == "Y"
             info["eqsl"] = self._text(root, "eqsl").upper() == "Y"
             full = full_name(info.pop("adr_name", ""))
@@ -314,7 +319,8 @@ class HamQTH(QObject):
                     "qth": f("city") or f("qth"), "country": f("country"), "grid": f("locator"),
                     "itu": f("itu"), "cq": f("cq"), "lat": f("latitude"), "lon": f("longitude"),
                     "qsl_via": f("manager"), "lotw": f("lotw").upper() in ("1", "Y", "YES"),
-                    "eqsl": (f("eqsl") or f("eqsle")).upper() in ("1", "Y", "YES"), "src": "QRZCQ"}, None
+                    "eqsl": (f("eqsl") or f("eqsle")).upper() in ("1", "Y", "YES"),
+                    "photo": f("picture") or f("image") or f("qslpic"), "src": "QRZCQ"}, None
         return None, None
 
     def _callook(self, call):
@@ -370,6 +376,38 @@ class HamQTH(QObject):
         if sources:
             self.cache[call] = info
         self.result.emit(call, info)
+
+
+TABLE_COLS = ["Date", "UTC", "Indicatif", "Nom", "Pays", "Fréquence", "Bande", "Mode", "Env.", "Reçu",
+              "QSL", "eQSL", "LoTW", "♪", "Réf."]
+C_PAYS, C_FREQ, C_QSL, C_EQSL, C_LOTW, C_AUDIO = 4, 5, 10, 11, 12, 13
+
+
+class PhotoLoader(QObject):
+    """Télécharge la photo d'un opérateur (adresse donnée par HamQTH, QRZ.com ou QRZCQ)."""
+    loaded = Signal(str, bytes)
+
+    def __init__(self):
+        super().__init__()
+        self.cache = {}
+
+    def get(self, call, url):
+        if call in self.cache:
+            self.loaded.emit(call, self.cache[call])
+            return
+        if not url.startswith("http"):
+            url = "https:" + url if url.startswith("//") else "https://" + url
+        threading.Thread(target=self._run, args=(call, url), daemon=True).start()
+
+    def _run(self, call, url):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": f"CATPilot/{__version__}"})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                data = r.read(4_000_000)
+            self.cache[call] = data
+            self.loaded.emit(call, data)
+        except Exception:
+            pass
 
 
 def full_name(name):
@@ -652,6 +690,17 @@ class LogDock(QDockWidget):
         self.lb_info.setObjectName("value")
         self.lb_info.setWordWrap(True)
         hi = QHBoxLayout()
+        self.lb_photo = QLabel()
+        self.lb_photo.setFixedSize(84, 84)
+        self.lb_photo.setAlignment(Qt.AlignCenter)
+        self.lb_photo.setCursor(Qt.PointingHandCursor)
+        self.lb_photo.setToolTip("Photo de l'opérateur (clic pour l'agrandir)")
+        self.lb_photo.mousePressEvent = lambda _e: self.show_photo()
+        self.lb_photo.hide()
+        self._photo = None
+        self.photos = PhotoLoader()
+        self.photos.loaded.connect(self._on_photo)
+        hi.addWidget(self.lb_photo)
         hi.addWidget(self.lb_info, 1)
         b = QPushButton("QRZ.com")
         b.setToolTip("Ouvrir la fiche de l'indicatif sur QRZ.com")
@@ -675,7 +724,19 @@ class LogDock(QDockWidget):
         b = QPushButton("Effacer")
         b.clicked.connect(self.clear_form)
         h.addWidget(b)
+        from PySide6.QtWidgets import QCheckBox
+        self.b_qrec = QPushButton("● Enregistrer le son")
+        self.b_qrec.setCheckable(True)
+        self.b_qrec.setToolTip("Enregistre le son reçu pendant le QSO ; le fichier est rattaché au QSO à son "
+                               "enregistrement (♪ dans la liste). Nécessite la chute d'eau (entrée audio du poste).")
+        self.b_qrec.toggled.connect(self.toggle_qso_rec)
+        h.addWidget(self.b_qrec)
+        self.ck_autorec = QCheckBox("auto")
+        self.ck_autorec.setToolTip("Démarrer l'enregistrement dès qu'on tape un indicatif")
+        self.ck_autorec.setChecked(s.value("log_autorec", "false") in (True, "true"))
+        h.addWidget(self.ck_autorec)
         v.addLayout(h)
+        self._rec_path = None
 
         h = QHBoxLayout()
         self.ed_search = QLineEdit()
@@ -686,13 +747,17 @@ class LogDock(QDockWidget):
         self.lb_count.setObjectName("hint")
         h.addWidget(self.lb_count)
         v.addLayout(h)
-        self.tbl = QTableWidget(0, 13)
-        self.tbl.setHorizontalHeaderLabels(["Date", "UTC", "Indicatif", "Nom", "Pays", "Fréquence", "Bande", "Mode",
-                                            "Env.", "Reçu", "eQSL", "LoTW", "Réf."])
-        self.tbl.horizontalHeaderItem(10).setToolTip("✔ confirmé · ↑ envoyé, en attente de confirmation")
-        self.tbl.horizontalHeaderItem(11).setToolTip("✔ confirmé · ↑ envoyé, en attente de confirmation")
-        self.tbl.setToolTip("Double-clic sur un QSO pour le modifier ou le supprimer")
+        self.tbl = QTableWidget(0, len(TABLE_COLS))
+        self.tbl.setHorizontalHeaderLabels(TABLE_COLS)
+        for c in (C_EQSL, C_LOTW):
+            self.tbl.horizontalHeaderItem(c).setToolTip("✔ confirmé · ↑ envoyé, en attente de confirmation")
+        self.tbl.horizontalHeaderItem(C_QSL).setToolTip("Carte QSL papier : ✔ reçue · ↑ envoyée · ✉ à envoyer")
+        self.tbl.horizontalHeaderItem(C_AUDIO).setToolTip("♪ enregistrement du QSO : clic pour l'écouter")
+        self.tbl.setToolTip("Double-clic : modifier ou supprimer · clic droit : cartes QSL, étiquettes")
         self.tbl.cellDoubleClicked.connect(self.edit_row)
+        self.tbl.cellClicked.connect(self._cell_clicked)
+        self.tbl.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tbl.customContextMenuRequested.connect(self.table_menu)
         self.tbl.verticalHeader().setVisible(False)
         from PySide6.QtCore import QSize
         self.tbl.setIconSize(QSize(24, 18))
@@ -747,7 +812,12 @@ class LogDock(QDockWidget):
                 ed.clear()
         self._auto.clear()
         self._qsl_via = ""
+        self._photo = None
+        self.lb_photo.hide()
         self.update_flag(txt.strip())
+        if txt.strip() and self.ck_autorec.isChecked() and not self.b_qrec.isChecked() and \
+                getattr(self.win, "wf", None) is not None and self.win.wf.running:
+            self.b_qrec.setChecked(True)
         prev = self.log.worked(txt.strip()) if len(txt.strip()) >= 3 else []
         dupe = self.contest_dupe(txt.strip())
         if dupe:
@@ -849,6 +919,8 @@ class LogDock(QDockWidget):
             except ValueError:
                 pass
         txt = f"{call} : {extra}" if extra else f"{call} trouvé"
+        if info.get("photo"):
+            self.photos.get(call, info["photo"])
         qsl = []
         if info.get("qsl_via"):
             self._qsl_via = info["qsl_via"].upper()
@@ -894,7 +966,10 @@ class LogDock(QDockWidget):
         self.cb_sig.setCurrentIndex(0)
         self.lb_info.clear()
         self.lb_flag.clear()
+        self.lb_photo.hide()
+        self._photo = None
         self._country = self._qsl_via = ""
+        self._finish_rec(None, None)
         self.t_start = None
         self.on_mode(self.cb_mode.currentText())
         self.ed_call.setFocus()
@@ -929,7 +1004,10 @@ class LogDock(QDockWidget):
                         "srx": rcvd if rcvd.isdigit() else ""})
             self.sp_serial.setValue(self.sp_serial.value() + 1)
             self.ed_xrcvd.clear()
-        self.log.add(rec)
+        if self.win.settings.value("qsl_default_r", "false") in (True, "true"):
+            rec["qsl_sent"] = "R"
+        qid = self.log.add(rec)
+        self._finish_rec(qid, rec)
         self.win.statusBar().showMessage(f"QSO avec {call} enregistré")
         self.clear_form()
 
@@ -952,14 +1030,33 @@ class LogDock(QDockWidget):
                            if x.strip())
             vals = [f"{d[6:8]}/{d[4:6]}/{d[:4]}" if len(d) == 8 else d, (r["time_on"] or "")[:4],
                     r["call"], r["name"], country, fq, r["band"], r["submode"] or r["mode"], r["rst_sent"],
-                    r["rst_rcvd"], "", "", ref.strip()]
+                    r["rst_rcvd"], "", "", "", "♪" if r.get("audio_file") else "", ref.strip()]
             for c, val in enumerate(vals):
                 self.tbl.setItem(i, c, QTableWidgetItem(val or ""))
             ic = flag_icon(iso)
             if ic:
-                self.tbl.item(i, 4).setIcon(ic)
-            self.tbl.item(i, 5).setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            for c, svc in ((10, "eqsl"), (11, "lotw")):
+                self.tbl.item(i, C_PAYS).setIcon(ic)
+            self.tbl.item(i, C_FREQ).setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            it = self.tbl.item(i, C_QSL)
+            it.setTextAlignment(Qt.AlignCenter)
+            qs, qr = (r.get("qsl_sent") or "").upper(), (r.get("qsl_rcvd") or "").upper()
+            via = {"B": "par le bureau", "D": "en direct", "M": "par le manager"}.get((r.get("qsl_sent_via") or "").upper(), "")
+            fmt = lambda x: f"{x[6:8]}/{x[4:6]}/{x[:4]}" if x and len(x) == 8 else ""
+            if qr == "Y":
+                it.setText("✔")
+                it.setForeground(QColor("#4caf50"))
+                it.setToolTip(f"Carte reçue {fmt(r.get('qslrdate'))}".strip()
+                              + (f" · envoyée {via} {fmt(r.get('qslsdate'))}".rstrip() if qs == "Y" else ""))
+            elif qs == "Y":
+                it.setText("↑")
+                it.setForeground(QColor("#9e9e9e"))
+                it.setToolTip(f"Carte envoyée {via} {fmt(r.get('qslsdate'))}".strip())
+            elif qs in ("R", "Q"):
+                it.setText("✉")
+                it.setForeground(QColor("#ffb300"))
+                it.setToolTip("Carte à envoyer (étiquette à imprimer)")
+            self.tbl.item(i, C_AUDIO).setTextAlignment(Qt.AlignCenter)
+            for c, svc in ((C_EQSL, "eqsl"), (C_LOTW, "lotw")):
                 it = self.tbl.item(i, c)
                 it.setTextAlignment(Qt.AlignCenter)
                 rd = r.get(f"{svc}_qslrdate") or ""
@@ -973,6 +1070,142 @@ class LogDock(QDockWidget):
                     it.setToolTip("Envoyé, pas encore confirmé")
         cc = self.log.confirmed_counts()
         self.lb_count.setText(f"{self.log.count()} QSO · confirmés : eQSL {cc['eqsl']}, LoTW {cc['lotw']}")
+
+    # --- cartes QSL papier, étiquettes, enregistrements ----------------------------------------
+    def selected_records(self):
+        rows = sorted({i.row() for i in self.tbl.selectedIndexes()})
+        return [self.rows[r] for r in rows if 0 <= r < len(self.rows)]
+
+    def table_menu(self, pos):
+        from PySide6.QtWidgets import QMenu
+        recs = self.selected_records()
+        if not recs:
+            return
+        n = len(recs)
+        m = QMenu(self)
+        today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d")
+        acts = [
+            (f"Carte à envoyer ({n} QSO) — pour les étiquettes", {"qsl_sent": "R"}),
+            (f"Carte envoyée par le bureau ({n})", {"qsl_sent": "Y", "qsl_sent_via": "B", "qslsdate": today}),
+            (f"Carte envoyée en direct ({n})", {"qsl_sent": "Y", "qsl_sent_via": "D", "qslsdate": today}),
+            (f"Carte reçue ({n})", {"qsl_rcvd": "Y", "qslrdate": today}),
+            ("Effacer l'état des cartes papier", {"qsl_sent": "", "qsl_rcvd": "", "qsl_sent_via": "", "qslsdate": "",
+                                                   "qslrdate": ""}),
+        ]
+        for label, rec in acts:
+            a = m.addAction(label)
+            a.triggered.connect(lambda _c=False, rc=rec: self.mark_qsl(recs, rc))
+        m.addSeparator()
+        a = m.addAction(f"Imprimer les étiquettes QSL de la sélection ({n})…")
+        a.triggered.connect(lambda: self.win.qsl_labels(recs))
+        a = m.addAction("Imprimer les étiquettes de toutes les cartes à envoyer…")
+        a.triggered.connect(lambda: self.win.qsl_labels(None))
+        m.addSeparator()
+        if n == 1:
+            a = m.addAction("Modifier ce QSO…")
+            a.triggered.connect(lambda: QsoEditDialog(self, recs[0]).exec())
+            if recs[0].get("audio_file"):
+                a = m.addAction("Écouter l'enregistrement")
+                a.triggered.connect(lambda: self.play_audio(recs[0]))
+        a = m.addAction(f"Supprimer ({n})…")
+        a.triggered.connect(self.delete_selected)
+        m.exec(self.tbl.viewport().mapToGlobal(pos))
+
+    def mark_qsl(self, recs, rec):
+        for r in recs:
+            self.log.update(r["id"], rec, notify=False)
+        self.log.changed.emit()
+
+    def _cell_clicked(self, row, col):
+        if col == C_AUDIO and 0 <= row < len(self.rows) and self.rows[row].get("audio_file"):
+            self.play_audio(self.rows[row])
+
+    def play_audio(self, r):
+        path = r.get("audio_file") or ""
+        if not os.path.exists(path):
+            QMessageBox.information(self, "Enregistrement", f"Fichier introuvable :\n{path}")
+            return
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    @staticmethod
+    def rec_dir():
+        d = os.path.join(data_dir(), "enregistrements", "QSO")
+        os.makedirs(d, exist_ok=True)
+        return d
+
+    def toggle_qso_rec(self, on):
+        wf = getattr(self.win, "wf", None)
+        if on:
+            if wf is None:
+                return
+            if not wf.running:
+                self.win.b_wf.setChecked(True)
+            if not wf.running:
+                self.b_qrec.blockSignals(True)
+                self.b_qrec.setChecked(False)
+                self.b_qrec.blockSignals(False)
+                self.lb_info.setText("Enregistrement impossible : lancez d'abord la chute d'eau (entrée audio du poste)")
+                return
+            path = os.path.join(self.rec_dir(), f"en_cours_{datetime.datetime.now():%Y%m%d_%H%M%S}.wav")
+            try:
+                wf.start_recording(path)
+            except Exception as e:
+                self.lb_info.setText(f"Enregistrement impossible : {e}")
+                return
+            self._rec_path = path
+            self.b_qrec.setText("■ Arrêter le son")
+            self.win._uncheck(self.win.b_rec)
+        else:
+            if wf and self._rec_path and wf.rec_path == self._rec_path:
+                wf.stop_recording()
+            self.b_qrec.setText("● Enregistrer le son")
+
+    def _finish_rec(self, qid, rec):
+        """Fin de QSO : le fichier en cours est renommé et rattaché au QSO."""
+        if not self._rec_path:
+            return
+        self.b_qrec.setChecked(False)
+        src, self._rec_path = self._rec_path, None
+        if qid is None:
+            try:
+                os.remove(src)
+            except OSError:
+                pass
+            return
+        name = f"{rec['call'].replace('/', '-')}_{rec['qso_date']}_{rec['time_on'][:4]}.wav"
+        dst = os.path.join(os.path.dirname(src), name)
+        try:
+            os.replace(src, dst)
+        except OSError:
+            dst = src
+        self.log.update(qid, {"audio_file": dst})
+
+    def show_photo(self):
+        if not self._photo:
+            return
+        d = QDialog(self)
+        d.setWindowTitle(self.ed_call.text().strip().upper() or "Photo")
+        lv = QVBoxLayout(d)
+        lb = QLabel()
+        pm = self._photo
+        if pm.width() > 640 or pm.height() > 640:
+            pm = pm.scaled(640, 640, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        lb.setPixmap(pm)
+        lv.addWidget(lb)
+        d.exec()
+
+    def _on_photo(self, call, data):
+        if call != self.ed_call.text().strip().upper() or not data:
+            return
+        from PySide6.QtGui import QPixmap
+        pm = QPixmap()
+        if not pm.loadFromData(data) or pm.isNull():
+            return
+        self._photo = pm
+        self.lb_photo.setPixmap(pm.scaled(84, 84, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self.lb_photo.show()
 
     def edit_row(self, row, _col=0):
         if 0 <= row < len(self.rows):
@@ -1042,6 +1275,7 @@ class LogDock(QDockWidget):
 
     def save_settings(self, s):
         s.setValue("log_myref", self.ed_myref.text())
+        s.setValue("log_autorec", self.ck_autorec.isChecked())
         s.setValue("log_mysig", self.cb_mysig.currentText() if self.cb_mysig.currentIndex() > 0 else "")
         s.setValue("contest_on", self.ck_contest.isChecked())
         s.setValue("contest_id", self.ed_contest.text())
@@ -1176,6 +1410,20 @@ class QsoEditDialog(QDialog):
         line("my_sig_info", "Ma référence", rec.get("my_sig_info"))
         line("qsl_via", "QSL via", rec.get("qsl_via"))
         line("comment", "Commentaire", rec.get("comment"))
+        self.cb_qs = QComboBox()
+        for label, val in (("non envoyée", ""), ("à envoyer", "R"), ("envoyée par le bureau", "Y/B"),
+                           ("envoyée en direct", "Y/D"), ("envoyée par le manager", "Y/M")):
+            self.cb_qs.addItem(label, val)
+        cur = (rec.get("qsl_sent") or "").upper()
+        cur = f"Y/{(rec.get('qsl_sent_via') or 'B').upper()}" if cur == "Y" else ("R" if cur in ("R", "Q") else "")
+        self.cb_qs.setCurrentIndex(max(0, self.cb_qs.findData(cur)))
+        self.cb_qr = QComboBox()
+        self.cb_qr.addItems(["non reçue", "reçue"])
+        self.cb_qr.setCurrentIndex(1 if (rec.get("qsl_rcvd") or "").upper() == "Y" else 0)
+        hq = QHBoxLayout()
+        hq.addWidget(self.cb_qs)
+        hq.addWidget(self.cb_qr)
+        f.addRow("Carte QSL papier", hq)
         v.addLayout(f)
         self.lb = QLabel("")
         self.lb.setObjectName("hint")
@@ -1185,6 +1433,10 @@ class QsoEditDialog(QDialog):
         b = QPushButton("Supprimer ce QSO")
         b.clicked.connect(self.remove)
         h.addWidget(b)
+        if rec.get("audio_file"):
+            b = QPushButton("♪ Écouter")
+            b.clicked.connect(lambda: dock.play_audio(rec))
+            h.addWidget(b)
         h.addStretch()
         b = QPushButton("Annuler")
         b.clicked.connect(self.reject)
@@ -1227,6 +1479,19 @@ class QsoEditDialog(QDialog):
             rec["gridsquare"] = gs[:2].upper() + gs[2:4] + gs[4:].lower()
         from .qsl import country_of
         rec["country"] = country_of(call)[1]
+        today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d")
+        qs = self.cb_qs.currentData()
+        old_sent = (self.rec.get("qsl_sent") or "").upper()
+        if qs.startswith("Y/"):
+            rec["qsl_sent"], rec["qsl_sent_via"] = "Y", qs[2]
+            rec["qslsdate"] = self.rec.get("qslsdate") if old_sent == "Y" and self.rec.get("qslsdate") else today
+        else:
+            rec["qsl_sent"], rec["qsl_sent_via"], rec["qslsdate"] = qs, "", ""
+        if self.cb_qr.currentIndex() == 1:
+            rec["qsl_rcvd"] = "Y"
+            rec["qslrdate"] = self.rec.get("qslrdate") or today
+        else:
+            rec["qsl_rcvd"], rec["qslrdate"] = "", ""
         self.log.update(self.rec["id"], rec)
         self.dock.win.statusBar().showMessage(f"QSO avec {call} modifié")
         self.accept()

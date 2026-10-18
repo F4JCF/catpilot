@@ -258,6 +258,9 @@ class StatusInfo:
             if band:
                 parts.append(band)
             parts.append(MODE_LABELS.get(st.mode, st.mode))
+            ant = getattr(w, "antennas", None)
+            if ant and ant.label():
+                parts.append(f"Ant. {ant.label()}")
             if "pwr" in st.p:
                 parts.append(f"{st.p['pwr']} W")
             if self.last_tx_swr:

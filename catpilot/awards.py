@@ -287,6 +287,9 @@ class AwardsDialog(QDialog):
                   + [sum(bandmode.get((b, m), 0) for m in modes), per_band.get(b, "")] for b in bands])
         tabs.addTab(t, "Bandes et modes")
 
+        tabs.insertTab(0, self._charts(rows, bandmode, conts, names), "Graphiques")
+        tabs.setCurrentIndex(0)
+
         best = ", ".join(f"{b} {n}" for b, n in per_band.items() if n)
         self.lb.setText(
             f"{len(rows)} QSO · {len(ent)} pays DXCC sur {total_ent} (DXCC : 100) · "
@@ -302,12 +305,72 @@ class AwardsDialog(QDialog):
         b.clicked.connect(lambda: self.export_csv(tabs))
         v.addWidget(bb)
 
+    def _charts(self, rows, bandmode, conts, names):
+        import datetime
+        from .charts import BarChart
+        w = QWidget()
+        g = QGridLayout(w)
+        today = datetime.date.today()
+        months = []
+        y, m = today.year, today.month
+        for _ in range(12):
+            months.append(f"{y:04d}{m:02d}")
+            m -= 1
+            if m == 0:
+                y, m = y - 1, 12
+        months.reverse()
+        per_month = collections.Counter((r.get("qso_date") or "")[:6] for r in rows)
+        mois = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."]
+        c1 = BarChart("QSO par mois (12 derniers mois)")
+        c1.set_data([(mois[int(k[4:]) - 1], per_month.get(k, 0), f"{mois[int(k[4:]) - 1]} {k[:4]}") for k in months])
+        days = [(today - datetime.timedelta(days=i)) for i in range(29, -1, -1)]
+        per_day = collections.Counter(r.get("qso_date") or "" for r in rows)
+        c2 = BarChart("QSO par jour (30 derniers jours)")
+        c2.set_data([(d.strftime("%d/%m"), per_day.get(d.strftime("%Y%m%d"), 0), d.strftime("%d/%m/%Y")) for d in days])
+        per_band = collections.Counter()
+        per_mode = collections.Counter()
+        for (b, md), n in bandmode.items():
+            per_band[b or "?"] += n
+            per_mode[md or "?"] += n
+        c3 = BarChart("QSO par bande")
+        c3.set_data([(b, per_band[b]) for b in BANDS if per_band.get(b)]
+                    + [(b, n) for b, n in per_band.items() if b not in BANDS])
+        c4 = BarChart("QSO par mode")
+        c4.set_data(sorted(per_mode.items(), key=lambda x: -x[1])[:12])
+        c5 = BarChart("QSO par continent")
+        c5.set_data([(k, conts.get(k, 0), n) for k, n in names.items()])
+        g.addWidget(c1, 0, 0)
+        g.addWidget(c2, 0, 1)
+        g.addWidget(c3, 1, 0)
+        g.addWidget(c4, 1, 1)
+        g.addWidget(c5, 2, 0)
+        b = QPushButton("Voir mes QSO sur la carte")
+        b.clicked.connect(self._show_map)
+        g.addWidget(b, 2, 1, Qt.AlignCenter)
+        return w
+
+    def _show_map(self):
+        mp = getattr(self.win, "mapdock", None)
+        if not mp:
+            return
+        mp.ck["log"].setChecked(True)
+        mp.cb_log.setCurrentIndex(3)
+        btn = getattr(self.win, "b_map", None)
+        if btn:
+            btn.setChecked(True)
+        mp.show()
+        mp.raise_()
+        self.accept()
+
     def export_csv(self, tabs):
         import csv
         import os
         from .logbook import data_dir
         w = tabs.currentWidget()
         tables = [w] if isinstance(w, QTableWidget) else w.findChildren(QTableWidget)
+        if not tables:
+            QMessageBox.information(self, "Exporter", "Choisissez un onglet avec un tableau (DXCC, zones…).")
+            return
         name = tabs.tabText(tabs.currentIndex()).split(" (")[0].replace(" ", "_")
         path, _ = QFileDialog.getSaveFileName(self, "Exporter en CSV", os.path.join(data_dir(), f"{name}.csv"),
                                               "CSV (*.csv)")

@@ -222,9 +222,50 @@ def wildcard_match(call, patterns):
     return False
 
 
+class PskReporter(QObject):
+    """Rapports de réception de pskreporter.info (qui a décodé mon indicatif ces 30 dernières minutes)."""
+    done = Signal(object)
+    URL = "https://retrieve.pskreporter.info/query"
+
+    def fetch(self, call):
+        threading.Thread(target=self._run, args=(call,), daemon=True).start()
+
+    def _run(self, call):
+        import urllib.parse
+        import xml.etree.ElementTree as ET
+        try:
+            q = urllib.parse.urlencode({"senderCallsign": call, "flowStartSeconds": "-1800", "rronly": "1",
+                                        "noactive": "1", "appcontact": "catpilot"})
+            req = urllib.request.Request(f"{self.URL}?{q}", headers=UA)
+            with urllib.request.urlopen(req, timeout=40) as r:
+                root = ET.fromstring(r.read())
+            out = {}
+            for el in root.iter():
+                if el.tag.split("}")[-1] != "receptionReport":
+                    continue
+                a = el.attrib
+                rx = (a.get("receiverCallsign") or "").upper()
+                if not rx:
+                    continue
+                t = int(a.get("flowStartSeconds") or 0) or int(time.time())
+                try:
+                    snr = int(a.get("sNR")) if a.get("sNR") not in (None, "") else None
+                except ValueError:
+                    snr = None
+                sp = {"spotter": rx, "grid": (a.get("receiverLocator") or "")[:6], "hz": int(a.get("frequency") or 0),
+                      "mode": a.get("mode") or "", "snr": snr, "t": t, "src": "PSK Reporter",
+                      "time": datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%H:%M")}
+                if rx not in out or out[rx]["t"] < t:
+                    out[rx] = sp
+            self.done.emit(list(out.values()))
+        except Exception as e:
+            self.done.emit(e)
+
+
 class SpotsDock(QDockWidget):
-    COLS = ["UTC", "Indicatif", "Fréquence", "Mode", "Référence", "Infos", "Distance"]
-    ME_COLS = ["UTC", "Entendu par", "Pays", "Distance", "Fréquence", "Mode", "dB", "Vitesse"]
+    COLS = ["UTC", "Indicatif", "Pays", "Fréquence", "Mode", "Référence", "Infos", "Distance"]
+    ME_COLS = ["UTC", "Entendu par", "Pays", "Distance", "Fréquence", "Mode", "dB", "Vitesse", "Source"]
+    BEACON_COLS = ["Bande", "Fréquence", "Balise en ce moment", "Lieu", "Distance", "Reste", "Suivante"]
 
     def __init__(self, win):
         super().__init__("Spots", win)
@@ -240,6 +281,10 @@ class SpotsDock(QDockWidget):
             c.status.connect(self.on_rbn_status)
             self.rbn.append(c)
         self.grids = {}                     # indicatif -> locator (stations RBN)
+        self.psk = PskReporter()
+        self.psk.done.connect(self.on_psk)
+        self.psk_timer = QTimer(self)
+        self.psk_timer.timeout.connect(self._psk_fetch)
         self.fetcher = Fetcher()
         self.fetcher.done.connect(self.on_fetched)
         self.cluster = DxCluster()
@@ -316,6 +361,12 @@ class SpotsDock(QDockWidget):
                                       "entendent s'affichent ici et sur la carte.")
                 self.b_rbn.toggled.connect(self.toggle_rbn)
                 mh.addWidget(self.b_rbn)
+                self.b_psk = QPushButton("PSK Reporter")
+                self.b_psk.setCheckable(True)
+                self.b_psk.setToolTip("pskreporter.info : stations qui ont décodé vos émissions FT8, FT4, PSK, JS8…\n"
+                                      "(avec WSJT-X ou le panneau Numérique). Interrogé toutes les 5 minutes.")
+                self.b_psk.toggled.connect(self.toggle_psk)
+                mh.addWidget(self.b_psk)
                 self.lb_me = QLabel("")
                 self.lb_me.setObjectName("value")
                 mh.addWidget(self.lb_me, 1)
@@ -335,8 +386,16 @@ class SpotsDock(QDockWidget):
                 t.cellDoubleClicked.connect(lambda r, _c, k=key: self.tune(k, r))
                 t.setToolTip("Double-clic : accorder le poste et préparer le QSO dans le carnet")
             pv.addWidget(t)
+            if key != "me":
+                lg = QLabel("<span style='color:#ff5252'>■</span> nouveau pays &nbsp; "
+                            "<span style='color:#ffab40'>■</span> pays nouveau sur la bande &nbsp; "
+                            "<span style='color:#ffd740'>■</span> pays contacté, pas encore confirmé &nbsp; "
+                            "<span style='color:#7a7a7a'>■</span> indicatif déjà contacté")
+                lg.setObjectName("hint")
+                pv.addWidget(lg)
             self.tables[key] = t
             self.tabs.addTab(page, title)
+        self._build_beacons()
         v.addWidget(self.tabs, 1)
         self.tabs.currentChanged.connect(self._tab_changed)
         h = QHBoxLayout()
@@ -358,6 +417,146 @@ class SpotsDock(QDockWidget):
         self.timer.timeout.connect(self.refresh_now)
         self._arm_timer()
         self.visibilityChanged.connect(lambda vis: vis and not self.data["pota"] and self.refresh_now())
+
+    # --- balises NCDXF ----------------------------------------------------------------------
+    def _build_beacons(self):
+        from .beacons import BEACONS
+        page = QWidget()
+        pv = QVBoxLayout(page)
+        pv.setContentsMargins(0, 4, 0, 0)
+        t = QLabel("Balises NCDXF/IARU : 18 balises à travers le monde se relaient toutes les 10 s sur 5 bandes "
+                   "(indicatif en CW puis 4 traits à 100, 10, 1 et 0,1 W). Double-clic : écouter la balise "
+                   "(le poste passe en CW sur la fréquence). L'horloge du PC doit être à l'heure.")
+        t.setWordWrap(True)
+        t.setObjectName("hint")
+        pv.addWidget(t)
+        tb = QTableWidget(0, len(self.BEACON_COLS))
+        tb.setHorizontalHeaderLabels(self.BEACON_COLS)
+        tb.verticalHeader().setVisible(False)
+        tb.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        tb.setSelectionBehavior(QAbstractItemView.SelectRows)
+        tb.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        tb.horizontalHeader().setStretchLastSection(True)
+        tb.cellDoubleClicked.connect(self._beacon_tune)
+        from PySide6.QtCore import QSize
+        tb.setIconSize(QSize(24, 18))
+        pv.addWidget(tb, 1)
+        h = QHBoxLayout()
+        self.ck_follow = QCheckBox("Suivre la balise")
+        self.ck_follow.setToolTip("Le poste change de bande toutes les 10 s pour rester sur cette balise")
+        h.addWidget(self.ck_follow)
+        self.cb_beacon = QComboBox()
+        for c, where, _g in BEACONS:
+            self.cb_beacon.addItem(f"{c} — {where}")
+        h.addWidget(self.cb_beacon)
+        h.addStretch()
+        pv.addLayout(h)
+        self.tb_beacons = tb
+        self.tabs.addTab(page, "Balises")
+        self._follow_last = None
+        self.beacon_timer = QTimer(self)
+        self.beacon_timer.timeout.connect(self._beacon_tick)
+        self.beacon_timer.start(1000)
+
+    def _beacon_tick(self):
+        from .beacons import BEACONS, FREQS, on_air, where_is
+        if self.ck_follow.isChecked() and self.ctrl.connected:
+            w = where_is(self.cb_beacon.currentIndex())
+            if w and w[1] != self._follow_last:
+                self._follow_last = w[1]
+                self.ctrl.set_freq(w[1])
+                if "CW" in self.ctrl.driver.modes:
+                    self.ctrl.set_mode("CW")
+        if not self.isVisible() or self.tabs.currentIndex() != self.tabs.count() - 1:
+            return
+        from .qsl import country_of, flag_icon
+        from .geo import distance_bearing as db
+        rows = on_air()
+        t = self.tb_beacons
+        t.setRowCount(len(rows))
+        pos = getattr(self.win, "station", None)
+        for i, (band, hz, idx, left) in enumerate(rows):
+            call, where, grid = BEACONS[idx]
+            nxt = BEACONS[(idx - 1) % len(BEACONS)][0]
+            dist = ""
+            if pos:
+                try:
+                    d, b = db(*pos, *from_locator(grid))
+                    dist = f"{d:.0f} km  {b:.0f}°"
+                except ValueError:
+                    pass
+            vals = [band, f"{hz / 1e3:.0f}".replace(".", ","), call, where, dist, f"{left:.0f} s", nxt]
+            for c, val in enumerate(vals):
+                it = QTableWidgetItem(val)
+                if c == 2:
+                    f = QFont(it.font())
+                    f.setBold(True)
+                    it.setFont(f)
+                    ic = flag_icon(country_of(call)[0])
+                    if ic:
+                        it.setIcon(ic)
+                if self._last_hz_band(hz):
+                    it.setForeground(QColor("#4fc3f7"))
+                t.setItem(i, c, it)
+
+    def _last_hz_band(self, hz):
+        st = getattr(self.win, "_last", None)
+        return bool(st and self.ctrl.connected and abs(st.freq - hz) < 1500)
+
+    def _beacon_tune(self, row, _col=0):
+        from .beacons import FREQS
+        if not self.ctrl.connected or not 0 <= row < len(FREQS):
+            return
+        self.ck_follow.setChecked(False)
+        self.ctrl.set_freq(FREQS[row][1])
+        if "CW" in self.ctrl.driver.modes:
+            self.ctrl.set_mode("CW")
+        self.win.statusBar().showMessage(f"Écoute des balises NCDXF sur {FREQS[row][1] / 1e3:.0f} kHz")
+
+    def current_beacons(self):
+        """Pour la carte : [(indicatif, locator, bande, fréquence)] des balises qui émettent."""
+        from .beacons import BEACONS, on_air
+        return [(BEACONS[i][0], BEACONS[i][2], band, hz) for band, hz, i, _l in on_air()]
+
+    # --- PSK Reporter --------------------------------------------------------------------------
+    def toggle_psk(self, on):
+        call = (self.win.settings.value("mycall", "") or "").strip().upper()
+        if on and not call:
+            self.lb_me.setText("Indiquez votre indicatif (menu Carnet > Réglages)")
+            self.b_psk.blockSignals(True)
+            self.b_psk.setChecked(False)
+            self.b_psk.blockSignals(False)
+            return
+        if on:
+            self._psk_fetch()
+            self.psk_timer.start(5 * 60_000)        # pskreporter.info demande au plus une requête / 5 min
+        else:
+            self.psk_timer.stop()
+
+    def _psk_fetch(self):
+        call = (self.win.settings.value("mycall", "") or "").strip().upper()
+        if call:
+            self.lb_me.setText("PSK Reporter : interrogation…")
+            self.psk.fetch(call)
+
+    def on_psk(self, data):
+        if isinstance(data, Exception):
+            self.lb_me.setText(f"PSK Reporter indisponible : {data}")
+            return
+        lst = self.data["me"]
+        now = time.time()
+        for sp in data:
+            info = cty.lookup(sp["spotter"])
+            from .logbook import french_name
+            sp["country"] = french_name(info) if info else ""
+            self._fill_spotter_pos(sp)
+            lst[:] = [x for x in lst if not (x["spotter"] == sp["spotter"] and x.get("src") == "PSK Reporter")]
+            lst.append(sp)
+        lst[:] = [x for x in lst if now - x["t"] < 3600]
+        lst.sort(key=lambda x: -x["t"])
+        if not data:
+            self.lb_me.setText("PSK Reporter : personne ne vous a signalé dans les 30 dernières minutes")
+        self.refresh_me()
 
     def _tab_changed(self, i):
         if i == 2 and self.alerts:
@@ -409,12 +608,26 @@ class SpotsDock(QDockWidget):
                 self.win.say_alert(sp, why)
         lst = self.data["dx"]
         lst[:] = [x for x in lst if not (x["call"] == sp["call"] and abs(x["hz"] - sp["hz"]) < 2000)]
+        sp.setdefault("t", time.time())
         lst.insert(0, sp)
+        self._check_6m(lst)
         del lst[300:]
         self.refresh_tables("dx")
         mp = getattr(self.win, "mapdock", None)
         if mp:
             mp.update_layers()
+
+    def _check_6m(self, lst):
+        """Ouverture du 6 m : au moins 4 spots européens sur 50 MHz en 15 minutes."""
+        if self.win.settings.value("alert_es", "true") not in (True, "true"):
+            return
+        now = time.time()
+        recent = {x["call"] for x in lst if 50_000_000 <= x["hz"] <= 54_000_000 and now - x.get("t", 0) < 900
+                  and (cty.lookup(x["call"]) or {}).get("cont") == "EU"}
+        if len(recent) >= 4 and now - getattr(self, "_six_alert", 0) > 3 * 3600:
+            self._six_alert = now
+            self.win.propagation_alert(f"le 6 m est ouvert : {len(recent)} stations européennes signalées "
+                                       f"en 15 min ({', '.join(sorted(recent)[:5])})")
 
     # --- alertes ----------------------------------------------------------------------------
     def alert_reason(self, sp):
@@ -477,6 +690,7 @@ class SpotsDock(QDockWidget):
         parse_rbn(sp)
         sp["spotter"] = re.sub(r"-[0-9#]+$", "", sp["spotter"].upper())
         sp["t"] = time.time()
+        sp["src"] = "RBN"
         g = self.grids.get(sp["spotter"])
         if g:
             sp["grid"] = g
@@ -489,7 +703,8 @@ class SpotsDock(QDockWidget):
             sp["country"] = french_name(info)
         self._fill_spotter_pos(sp)
         lst = self.data["me"]
-        lst[:] = [x for x in lst if x["spotter"] != sp["spotter"] and time.time() - x["t"] < 3600]
+        lst[:] = [x for x in lst if not (x["spotter"] == sp["spotter"] and x.get("src", "RBN") == "RBN")
+                  and time.time() - x["t"] < 3600]
         lst.insert(0, sp)
         self.refresh_me()
 
@@ -543,7 +758,8 @@ class SpotsDock(QDockWidget):
                     f"{sp['km']:.0f} km" if sp.get("km") is not None else "",
                     f"{sp['hz'] / 1e3:.1f}".replace(".", ","), sp.get("mode", ""),
                     f"{sp['snr']} dB" if sp.get("snr") is not None else "",
-                    f"{sp['wpm']} mots/min" if sp.get("wpm") and sp.get("mode") == "CW" else ""]
+                    f"{sp['wpm']} mots/min" if sp.get("wpm") and sp.get("mode") == "CW" else "",
+                    sp.get("src", "RBN")]
             for c, val in enumerate(vals):
                 it = QTableWidgetItem(val)
                 if c in (3, 4, 6):
@@ -604,7 +820,27 @@ class SpotsDock(QDockWidget):
                 return False
         return True
 
+    def spot_status(self, sp):
+        """« new », « newband », « unconf », « worked » ou "" (pour la couleur de la ligne)."""
+        ent = cty.dxcc(sp["call"])
+        if not ent:
+            return "worked" if self.win.worked_before(sp["call"]) else ""
+        worked = self.win.worked_entities()
+        if ent["prefix"] not in worked:
+            return "new"
+        from .logbook import band_of_mhz
+        band = band_of_mhz(sp["hz"] / 1e6)
+        if band and band not in worked.get(ent["prefix"], set()):
+            return "newband"
+        conf = getattr(self.win, "confirmed_entities", lambda: set())()
+        if ent["prefix"] not in conf:
+            return "unconf"
+        return "worked" if self.win.worked_before(sp["call"]) else ""
+
+    STATUS_STYLE = {"new": ("#ff5252", 60), "newband": ("#ffab40", 45), "unconf": ("#ffd740", 30)}
+
     def refresh_tables(self, only=None):
+        from .qsl import country_of, flag_icon
         pos = getattr(self.win, "station", None)
         for key, t in self.tables.items():
             if key == "me" or (only and isinstance(only, str) and key != only):
@@ -621,19 +857,32 @@ class SpotsDock(QDockWidget):
                     except ValueError:
                         pass
                 info = " — ".join(x for x in (sp.get("info"), sp.get("where")) if x)
-                vals = [sp["time"], sp["call"], f"{sp['hz'] / 1e3:.1f}".replace(".", ","), sp["mode"],
+                iso, country = country_of(sp["call"])
+                stat = self.spot_status(sp)
+                vals = [sp["time"], sp["call"], country, f"{sp['hz'] / 1e3:.1f}".replace(".", ","), sp["mode"],
                         sp["ref"], info, dist]
                 for c, val in enumerate(vals):
                     it = QTableWidgetItem(val)
                     if c == 2:
+                        ic = flag_icon(iso)
+                        if ic:
+                            it.setIcon(ic)
+                    if c == 3:
                         it.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                    if stat in self.STATUS_STYLE:
+                        col, alpha = self.STATUS_STYLE[stat]
+                        bg = QColor(col)
+                        bg.setAlpha(alpha)
+                        it.setBackground(bg)
+                        it.setToolTip({"new": "Nouveau pays DXCC", "newband": "Pays jamais contacté sur cette bande",
+                                       "unconf": "Pays contacté mais pas encore confirmé (QSL, eQSL, LoTW)"}[stat])
                     if sp.get("alert"):
                         it.setForeground(QColor("#ff9a2e"))
                         f = QFont(it.font())
                         f.setBold(True)
                         it.setFont(f)
                         it.setToolTip("Alerte : " + sp["alert"])
-                    elif self.win.worked_before(sp["call"]):
+                    elif stat == "worked" or self.win.worked_before(sp["call"]):
                         it.setForeground(QColor("#7a7a7a"))
                     t.setItem(i, c, it)
 

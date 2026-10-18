@@ -1279,6 +1279,7 @@ class MainWindow(QMainWindow):
                             ("Sauvegarde Nextcloud…", self.backup_dialog),
                             ("Envoi en ligne : QRZ.com, eQSL, Club Log, LoTW…", self.upload_dialog),
                             ("Relever les confirmations eQSL et LoTW", self.qsl_sync_now),
+                            ("Étiquettes QSL des cartes à envoyer…", lambda: self.qsl_labels(None)),
                             ("Diplômes et statistiques…", self.awards_dialog),
                             (None, None),
                             ("Réglages : indicatif, HamQTH, QRZCQ et QRZ.com…", self.log_settings)):
@@ -1577,6 +1578,7 @@ class MainWindow(QMainWindow):
             rows = self.log.db.execute("SELECT DISTINCT call, band FROM qso").fetchall()
         self._worked = {r[0] for r in rows}
         self._entities = None
+        self._confirmed = None
 
     def upload_dialog(self):
         from .awards import UploadDialog
@@ -1613,6 +1615,11 @@ class MainWindow(QMainWindow):
         self.backup.status.connect(lambda m: self.statusBar().showMessage(m, 10000))
         from .scheduler import Scheduler
         self.scheduler = Scheduler(self)
+        from .antennas import Antennas
+        self.antennas = Antennas(self)
+        a5 = QAction("Profils d'antenne (antenne, puissance max par bande)…", self)
+        a5.triggered.connect(self.antenna_dialog)
+        self.menu_poste.addAction(a5)
         a3 = QAction("Reconnexion automatique si la liaison est perdue", self, checkable=True)
         a3.setChecked(s.value("auto_reconnect", "true") in (True, "true"))
         a3.toggled.connect(lambda on: self.settings.setValue("auto_reconnect", "true" if on else "false"))
@@ -1661,10 +1668,26 @@ class MainWindow(QMainWindow):
         a.setChecked(self.announcer.enabled)
         a.toggled.connect(lambda on: setattr(self.announcer, "enabled", on))
         voice.addAction(a)
+        a = QAction("Annoncer maintenant (fréquence, mode, S-mètre)", self)
+        a.setShortcut("F9")
+        a.triggered.connect(self.announce_now)
+        voice.addAction(a)
+        self.addAction(a)
+        a = QAction("Bande et antenne à chaque changement de bande", self, checkable=True)
+        a.setChecked(s.value("speak_band", "false") in (True, "true"))
+        a.toggled.connect(lambda on: self.settings.setValue("speak_band", "true" if on else "false"))
+        voice.addAction(a)
         a = QAction("Alertes du DX cluster", self, checkable=True)
         a.setChecked(self.speak_alerts)
         a.toggled.connect(lambda on: setattr(self, "speak_alerts", on))
         voice.addAction(a)
+        palerts = aff.addMenu("Alertes de propagation")
+        for key, label in (("alert_es", "Ouverture du 6 m (sporadique E, d'après hamqsl et le DX cluster)"),
+                           ("alert_aurora", "Aurore et orage magnétique (indice K ≥ 5)")):
+            a = QAction(label, self, checkable=True)
+            a.setChecked(s.value(key, "true") in (True, "true"))
+            a.toggled.connect(lambda on, k=key: self.settings.setValue(k, "true" if on else "false"))
+            palerts.addAction(a)
         a = QAction("Essayer la voix", self)
         a.triggered.connect(lambda: self.speaker.say("CAT Pilot, annonces vocales actives. 73."))
         voice.addAction(a)
@@ -1720,6 +1743,46 @@ class MainWindow(QMainWindow):
             self.showNormal()
         self.set_freq_size(self.freq_size)
 
+    def antenna_dialog(self):
+        from .antennas import AntennaDialog
+        AntennaDialog(self).exec()
+
+    def announce_now(self):
+        st = self._last
+        if not st or not self.ctrl.connected:
+            self.speaker.say("Poste non connecté")
+            return
+        from .extras import MODE_SPOKEN, spoken_freq
+        txt = f"{spoken_freq(st.freq)}, {MODE_SPOKEN.get(st.mode, st.mode)}"
+        if st.ptt:
+            txt += ", en émission"
+        elif getattr(st, "s_text", ""):
+            txt += f", signal {st.s_text.replace('+', ' plus ')}"
+        if "pwr" in st.p:
+            txt += f", puissance {st.p['pwr']} watts"
+        self.speaker.say(txt)
+
+    def check_openings(self, data):
+        from .propagation import openings
+        s = self.settings
+        on = {"es": s.value("alert_es", "true"), "aurora": s.value("alert_aurora", "true"),
+              "storm": s.value("alert_aurora", "true")}
+        seen = getattr(self, "_openings_seen", {})
+        now = time.time()
+        for kind, text in openings(data):
+            if on.get(kind) not in (True, "true") or now - seen.get(kind, 0) < 3 * 3600:
+                continue
+            seen[kind] = now
+            self.propagation_alert(text)
+        self._openings_seen = seen
+
+    def propagation_alert(self, text):
+        self.statusBar().showMessage(f"Propagation : {text}", 60000)
+        QApplication.beep()
+        if self.speak_alerts:
+            self.speaker.say(f"Propagation. {text.split('(')[0]}")
+        self._prop_alert_text = text
+
     def say_alert(self, sp, why):
         if self.speak_alerts:
             call = " ".join(sp["call"])
@@ -1740,6 +1803,16 @@ class MainWindow(QMainWindow):
             self._entities = ent
         return self._entities
 
+    def confirmed_entities(self):
+        """Pays DXCC confirmés (carte, eQSL ou LoTW)."""
+        if getattr(self, "_confirmed", None) is None:
+            from . import cty
+            with self.log.lock:
+                rows = self.log.db.execute("SELECT DISTINCT call FROM qso WHERE lotw_qsl_rcvd = 'Y' OR "
+                                           "eqsl_qsl_rcvd = 'Y' OR qsl_rcvd = 'Y'").fetchall()
+            self._confirmed = {e["prefix"] for (c,) in rows for e in [cty.dxcc(c or "")] if e}
+        return self._confirmed
+
     def worked_before(self, call):
         return call.upper() in self._worked
 
@@ -1751,6 +1824,10 @@ class MainWindow(QMainWindow):
         self.b_log.setChecked(True)
         self.logdock.raise_()
         self.logdock.ed_call.setFocus()
+
+    def qsl_labels(self, recs=None):
+        from .qslprint import LabelDialog
+        LabelDialog(self, recs).exec()
 
     def qsl_sync_now(self):
         if not any(self.qsl_sync.configured().values()):
@@ -1953,6 +2030,7 @@ class MainWindow(QMainWindow):
             short = name.replace("m-", "-").replace("m", "")
             bands.append(f"{short} <span style='color:{colors.get(cond, TEXT)}'>●</span>")
         k = data.get("kindex", "?")
+        self.check_openings(data)
         self.b_prop.setText("")
         lbl = getattr(self, "_prop_label", None)
         if lbl is None:
@@ -2130,7 +2208,7 @@ class MainWindow(QMainWindow):
             return
         self._last = st
         self._state_time = time.monotonic()
-        for hook in (self.status_info.on_state, self.qsy.on_state, self.announcer.on_state):
+        for hook in (self.status_info.on_state, self.qsy.on_state, self.announcer.on_state, self.antennas.on_state):
             hook(st)
         self.bandplan.set_freq(st.freq, st.ptt)
         self._check_out_of_band(st)

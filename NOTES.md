@@ -1,2 +1,12 @@
-Nouveautés de la 0.22.2 :
-- Carnet : colonnes de la liste dans l'ordre Date, UTC, Indicatif, Nom, Pays, Fréquence, Bande, Mode, Env., Reçu, eQSL, LoTW, Réf.
+Nouveautés de la 0.23.0 :
+- Cartes QSL papier : colonne « QSL » dans le carnet (✉ à envoyer, ↑ envoyée, ✔ reçue). Clic droit sur un ou plusieurs QSO : carte à envoyer, envoyée par le bureau ou en direct, reçue. Aussi dans la fenêtre de modification (double-clic).
+- Étiquettes QSL : PDF prêt à imprimer sur planches A4 (24, 21, 14 ou 30 étiquettes), une étiquette par correspondant avec jusqu'à 4 QSO et son manager (« via »). On peut commencer sur une planche entamée. Carnet > Étiquettes QSL, ou clic droit dans le carnet.
+- Photo de l'opérateur dans la fiche de l'indicatif (HamQTH, QRZ.com ou QRZCQ), clic pour l'agrandir.
+- Statistiques en graphiques (Diplômes > Graphiques) : QSO par mois, par jour, par bande, par mode et par continent, et bouton pour voir tous ses QSO sur la carte.
+- Enregistrement du son des QSO : bouton « Enregistrer le son » dans le carnet (ou automatique dès qu'on tape un indicatif). Le fichier est rattaché au QSO : ♪ dans la liste, clic pour l'écouter.
+- Spots : drapeau et pays de chaque station, et couleurs : rouge nouveau pays, orange pays nouveau sur la bande, jaune pays pas encore confirmé, gris indicatif déjà contacté.
+- PSK Reporter dans « Qui m'entend ? » : les stations qui ont décodé vos émissions FT8/FT4… s'affichent avec les spots du RBN, et sur la carte.
+- Balises NCDXF/IARU : nouvel onglet « Balises » des spots (la balise qui émet sur chaque bande, son lieu, sa distance), double-clic pour l'écouter, « Suivre la balise » d'une bande à l'autre. Couche « Balises » sur la carte.
+- Alertes de propagation : ouverture du 6 m (sporadique E, d'après hamqsl.com et le DX cluster), aurore et orage magnétique. Affichage > Alertes de propagation.
+- Annonce vocale à la demande : touche F9 (fréquence, mode, S-mètre, puissance). Option d'annonce de la bande et de l'antenne à chaque changement de bande.
+- Profils d'antenne (Poste > Profils d'antenne) : par bande, l'antenne, la puissance maximale et un rappel (boîte d'accord, commutateur). Affichés au changement de bande ; la puissance est ramenée sous le maximum. L'antenne en service s'affiche en bas de la fenêtre.

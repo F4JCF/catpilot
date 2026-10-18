@@ -35,6 +35,7 @@ class MapDock(QDockWidget):
                 ("me", "Qui m'entend", True, "Stations du RBN qui vous entendent (panneau Spots)"),
                 ("dx", "Spots DX", True, "Spots du DX cluster des 30 dernières minutes, couleur selon la bande"),
                 ("pota", "POTA", False, "Activations POTA en cours"),
+                ("beacons", "Balises", False, "Balises NCDXF qui émettent en ce moment (changent toutes les 10 s)"),
                 ("log", "Mes QSO", False, "QSO du carnet")):
             c = QCheckBox(label)
             c.setToolTip(tip)
@@ -87,6 +88,7 @@ class MapDock(QDockWidget):
         if self._dirty:
             self._dirty = False
             self._rebuild()
+        self._beacons()
         self._sun_info()
 
     def _sun_info(self):
@@ -174,7 +176,31 @@ class MapDock(QDockWidget):
                             "color": "#4fc3f7", "size": 3, "line": days == 1})
         m.set_layer("log", pts)
 
+    def _beacons(self):
+        spots = getattr(self.win, "spots", None)
+        on = self.ck["beacons"].isChecked() and spots is not None
+        cur = spots.current_beacons() if on else []
+        key = tuple(c for c, *_r in cur)
+        if key == getattr(self, "_bkey", None):
+            return
+        self._bkey = key
+        pts = []
+        for call, grid, band, hz in cur:
+            try:
+                lat, lon = from_locator(grid)
+            except ValueError:
+                continue
+            pts.append({"lat": lat, "lon": lon, "label": f"{call} {band}",
+                        "tip": f"Balise {call} émet sur {hz / 1e3:.0f} kHz ({band})", "color": band_color(hz),
+                        "size": 5, "line": True, "beacon": hz})
+        self.map.set_layer("beacons", pts)
+
     def on_click(self, pt):
+        if pt and pt.get("beacon") and self.win.ctrl.connected:
+            self.win.ctrl.set_freq(pt["beacon"])
+            if "CW" in self.win.ctrl.driver.modes:
+                self.win.ctrl.set_mode("CW")
+            return
         if pt and pt.get("spot") and self.win.spots:
             kind, sp = pt["spot"]
             rows = self.win.spots.tables[kind].property("rows") or []
