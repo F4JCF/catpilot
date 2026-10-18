@@ -215,6 +215,11 @@ class MemoryDock(QDockWidget):
         grouped = bool(getattr(drv, "mem_groups", None))
         self.lb_group.setVisible(grouped)
         self.sp_group.setVisible(grouped)
+        if grouped:
+            lo, hi = getattr(drv, "mem_group_range", (0, 99))
+            self.sp_group.setRange(lo, hi)
+            self.sp_group.setToolTip(getattr(drv, "mem_group_hint",
+                                             "L'IC-705 range ses mémoires en 100 groupes de 100 canaux"))
 
     def read_from_radio(self):
         drv = self._drv()

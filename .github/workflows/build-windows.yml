@@ -15,13 +15,20 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements.txt pyinstaller
       - name: Bibliothèque FT8 (ft8_lib)
-        shell: pwsh
+        shell: bash
         run: |
-          if (-not (Get-Command gcc -ErrorAction SilentlyContinue)) { choco install mingw -y --no-progress; $env:Path = "C:\ProgramData\mingw64\mingw64\bin;" + $env:Path }
-          gcc --version
-          python native/build_ft8.py
-          if (-not (Test-Path catpilot/ft8lib.dll)) { throw "ft8lib.dll absente" }
-          python -c "import ctypes; ctypes.CDLL(r'catpilot/ft8lib.dll'); print('ft8lib OK')"
+          set +e
+          which gcc || echo "::warning::gcc absent du PATH"
+          gcc --version 2>&1 | head -1 | sed 's/^/::notice::/'
+          python native/build_ft8.py > build_ft8.log 2>&1
+          rc=$?
+          if [ $rc -ne 0 ] || [ ! -f catpilot/ft8lib.dll ]; then
+            grep -iE "error|erreur|undefined|cannot" build_ft8.log | head -20 | sed 's/^/::error::/'
+            tail -5 build_ft8.log | sed 's/^/::error::/'
+            exit 1
+          fi
+          python -c "import ctypes; ctypes.CDLL(r'catpilot/ft8lib.dll'); print('ft8lib OK')" 2>&1 | sed 's/^/::notice::/'
+          python -c "import ctypes; ctypes.CDLL(r'catpilot/ft8lib.dll')" || { echo "::error::ft8lib.dll ne se charge pas"; exit 1; }
       - run: pyinstaller --noconfirm --onefile --windowed --name CATPilot --icon assets/catpilot.ico --add-data "assets;assets" --add-binary "catpilot/ft8lib.dll;." --collect-all pyrtlsdrlib --collect-all sstv run.py
       - name: Version
         id: ver
