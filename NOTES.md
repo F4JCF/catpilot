@@ -1,4 +1,4 @@
-Nouveautés de la 0.21.1 :
-- Les panneaux (Spots, Carte, Carnet, Numérique…) s'ouvrent maintenant en grand : ils prennent toute la fenêtre, et seuls restent en haut l'afficheur de fréquence avec le plan de bande, le S-mètre, le SWR et l'ALC.
-- Le panneau qu'on ouvre remplace le précédent. Un nouveau clic sur son bouton (ou la croix) le ferme et la face avant complète revient.
-- Pour retrouver l'ancien comportement (panneau sur le côté) : Affichage > Panneaux en grand (à décocher). Un panneau détaché en fenêtre reste libre.
+Nouveautés de la 0.21.2 (main courante) :
+- Horodatage automatique : l'heure avance en direct tant que rien n'est saisi, puis se fige toute seule dès le premier caractère tapé (De, À, Moyen, Type ou Message). Plus besoin de cliquer sur « Maintenant » (le bouton « Remettre à l'heure » reste pour reprendre l'heure actuelle).
+- Nouveau champ « Type » de message, avec les types habituels : Message, Information, Ordre, Demande, Compte rendu, Point de situation, Bilan, Alerte, Contrôle radio, Accusé de réception, Relève. Les modèles choisissent le type tout seuls. Colonne « Type » dans le tableau et dans les exports PDF/CSV.
+- De, À, Moyen et Opérateur sont des listes déroulantes déjà remplies (PC ADRASEC 06, COD 06, CODIS 06, SDIS 06, Préfecture 06, SAMU 06, Gendarmerie, Mairie… ; VHF, UHF, HF, Relais, Téléphone…) et qui retiennent les indicatifs et organismes saisis, les plus récents en tête. La saisie propose aussi les noms déjà connus.

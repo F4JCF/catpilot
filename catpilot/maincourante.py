@@ -12,7 +12,7 @@ import os
 import sqlite3
 import threading
 
-from PySide6.QtCore import QMarginsF, Qt
+from PySide6.QtCore import QMarginsF, Qt, QTimer
 from PySide6.QtGui import QColor, QPageLayout, QPageSize, QPdfWriter, QTextDocument
 from PySide6.QtWidgets import (
     QAbstractItemView, QComboBox, QDockWidget, QFileDialog, QGridLayout, QHBoxLayout, QHeaderView,
@@ -22,8 +22,66 @@ from PySide6.QtWidgets import (
 
 from .logbook import data_dir
 
-COLS = ["n", "ts", "utc", "sens", "de", "a", "moyen", "prio", "message", "suite", "operateur"]
-HEAD = ["N°", "Date et heure", "UTC", "Sens", "De", "À", "Moyen", "Priorité", "Message", "Suite donnée", "Opérateur"]
+COLS = ["n", "ts", "utc", "sens", "type", "de", "a", "moyen", "prio", "message", "suite", "operateur"]
+HEAD = ["N°", "Date et heure", "UTC", "Sens", "Type", "De", "À", "Moyen", "Priorité", "Message", "Suite donnée",
+        "Opérateur"]
+TYPES = ["Message", "Information", "Ordre", "Demande", "Compte rendu", "Point de situation", "Bilan", "Alerte",
+         "Contrôle radio", "Accusé de réception", "Relève", "Autre"]
+CORRESP = ["PC ADRASEC 06", "COD 06", "CODIS 06", "SDIS 06", "Préfecture 06", "SAMU 06", "Gendarmerie", "Police",
+           "Mairie", "PC opérationnel", "Station mobile", "Station fixe", "Toutes stations"]
+MOYENS = ["VHF", "UHF", "HF", "Relais", "Téléphone", "SMS", "Courriel", "Message porté"]
+TEMPLATE_TYPE = {"Arrivée sur zone": "Compte rendu", "Contrôle radio": "Contrôle radio", "Position": "Information",
+                 "Point de situation": "Point de situation", "Bilan radio": "Bilan", "Demande de moyens": "Demande",
+                 "Relève": "Relève", "Fin de mission": "Compte rendu"}
+
+
+class HistCombo(QComboBox):
+    """Liste modifiable qui retient les saisies (les plus récentes en tête) en plus des valeurs habituelles."""
+
+    def __init__(self, settings, key, defaults, placeholder="", upper=False):
+        super().__init__()
+        self.s, self.key, self.defaults, self.upper = settings, key, list(defaults), upper
+        self.setEditable(True)
+        self.setInsertPolicy(QComboBox.NoInsert)
+        self.lineEdit().setPlaceholderText(placeholder)
+        from PySide6.QtWidgets import QCompleter
+        self.setMaxVisibleItems(20)
+        try:
+            self.hist = json.loads(settings.value(key, "[]") or "[]")
+        except ValueError:
+            self.hist = []
+        self._fill()
+        self.completer().setCaseSensitivity(Qt.CaseInsensitive)
+        self.completer().setFilterMode(Qt.MatchContains)
+        self.completer().setCompletionMode(QCompleter.PopupCompletion)
+
+    def _fill(self, extra=()):
+        cur = self.currentText()
+        self.blockSignals(True)
+        super().clear()
+        seen = set()
+        for v in list(extra) + self.hist + self.defaults:
+            if v and v.upper() not in seen:
+                seen.add(v.upper())
+                self.addItem(v)
+        self.setEditText(cur)
+        self.blockSignals(False)
+
+    def text(self):
+        t = self.currentText().strip()
+        return t.upper() if self.upper and not any(c.islower() for c in t[1:]) else t
+
+    def setText(self, t):
+        self.setEditText(t)
+
+    def remember(self, extra=()):
+        t = self.currentText().strip()
+        if t:
+            self.hist = [t] + [h for h in self.hist if h.upper() != t.upper()]
+            del self.hist[60:]
+            self.s.setValue(self.key, json.dumps(self.hist))
+        self._fill(extra)
+
 PRIOS = ["Routine", "Urgent", "Très urgent"]
 SENS = ["Reçu", "Émis", "Info"]
 PRIO_COLORS = {"Urgent": "#ff9800", "Très urgent": "#f44336"}
@@ -49,6 +107,10 @@ class Journal:
                             "responsable TEXT, debut TEXT, fin TEXT)")
             self.db.execute("CREATE TABLE IF NOT EXISTS message (id INTEGER PRIMARY KEY, op INTEGER, "
                             + ", ".join(f"{c} TEXT" for c in COLS) + ")")
+            have = {r[1] for r in self.db.execute("PRAGMA table_info(message)")}
+            for c in COLS:
+                if c not in have:
+                    self.db.execute(f"ALTER TABLE message ADD COLUMN {c} TEXT")
             self.db.commit()
 
     def operations(self):
@@ -133,26 +195,28 @@ class MainCouranteDock(QDockWidget):
         g = QGridLayout()
         self.cb_sens = QComboBox()
         self.cb_sens.addItems(SENS)
-        self.ed_de = QLineEdit()
-        self.ed_de.setPlaceholderText("indicatif, poste ou service")
-        self.ed_a = QLineEdit()
-        self.ed_a.setPlaceholderText("indicatif, poste ou service")
-        self.ed_moyen = QLineEdit()
-        self.ed_moyen.setPlaceholderText("fréquence, canal, téléphone…")
+        self.ed_de = HistCombo(s, "mc_hist_de", CORRESP, "indicatif, poste ou service", upper=True)
+        self.ed_a = HistCombo(s, "mc_hist_a", CORRESP, "indicatif, poste ou service", upper=True)
+        self.ed_moyen = HistCombo(s, "mc_hist_moyen", MOYENS, "fréquence, canal, téléphone…")
+        self.cb_type = HistCombo(s, "mc_hist_type", TYPES, "type de message")
+        self.cb_type.setText("Message")
         self.cb_prio = QComboBox()
         self.cb_prio.addItems(PRIOS)
-        self.ed_op = QLineEdit(s.value("mc_operateur", "") or s.value("mycall", ""))
-        self.ed_op.setPlaceholderText("opérateur")
+        self.ed_op = HistCombo(s, "mc_hist_op", [], "opérateur", upper=True)
+        self.ed_op.setText(s.value("mc_operateur", "") or s.value("mycall", ""))
         self.ed_msg = QPlainTextEdit()
         self.ed_msg.setPlaceholderText("Texte du message. Ctrl+Entrée pour enregistrer.")
         self.ed_msg.setMaximumHeight(70)
         self.ed_msg.textChanged.connect(self._start_clock)
+        for cb in (self.ed_de, self.ed_a, self.ed_moyen):
+            cb.editTextChanged.connect(lambda _t: self._start_clock())
+        self.cb_type.editTextChanged.connect(lambda _t: self._start_clock())
         self.ed_suite = QLineEdit()
         self.ed_suite.setPlaceholderText("suite donnée, observations")
         self.lb_time = QLabel("—")
         self.lb_time.setObjectName("value")
-        b_now = QPushButton("Maintenant")
-        b_now.setToolTip("Reprendre l'heure actuelle")
+        b_now = QPushButton("Remettre à l'heure")
+        b_now.setToolTip("L'heure se fige toute seule dès la première saisie ; ce bouton reprend l'heure actuelle")
         b_now.clicked.connect(lambda: self._start_clock(force=True))
         g.addWidget(QLabel("Heure"), 0, 0)
         hh = QHBoxLayout()
@@ -161,7 +225,11 @@ class MainCouranteDock(QDockWidget):
         hh.addStretch()
         g.addLayout(hh, 0, 1)
         g.addWidget(QLabel("Sens"), 0, 2)
-        g.addWidget(self.cb_sens, 0, 3)
+        sh = QHBoxLayout()
+        sh.addWidget(self.cb_sens, 1)
+        sh.addWidget(QLabel("Type"))
+        sh.addWidget(self.cb_type, 2)
+        g.addLayout(sh, 0, 3)
         g.addWidget(QLabel("De"), 1, 0)
         g.addWidget(self.ed_de, 1, 1)
         g.addWidget(QLabel("À"), 1, 2)
@@ -240,6 +308,10 @@ class MainCouranteDock(QDockWidget):
         self.setMinimumWidth(620)
         win.log.added.connect(self._qso_added)
         self.reload_ops(select=int(s.value("mc_op", 0) or 0))
+        self._clock = QTimer(self)
+        self._clock.timeout.connect(self._live_clock)
+        self._clock.start(1000)
+        self._live_clock()
 
     # --- opérations -----------------------------------------------------------------------
     def reload_ops(self, select=None):
@@ -274,11 +346,20 @@ class MainCouranteDock(QDockWidget):
             self.reload_ops(select=op)
 
     # --- saisie ---------------------------------------------------------------------------
+    def _live_clock(self):
+        """Tant que rien n'est saisi, l'heure affichée avance ; elle se fige à la première saisie."""
+        if self.t0 is None:
+            now = datetime.datetime.now().astimezone()
+            self.lb_time.setText(now.strftime("%d/%m/%Y %H:%M:%S") +
+                                 now.astimezone(datetime.timezone.utc).strftime("  (%H:%M UTC)") + "  · se fige à la saisie")
+            self.lb_time.setStyleSheet("color: #8a8a8a;")
+
     def _start_clock(self, force=False):
+        if getattr(self, "_filling", False):
+            return
         if self.t0 is None or force:
-            if not force and not self.ed_msg.toPlainText().strip():
-                return
             self.t0 = datetime.datetime.now().astimezone()
+            self.lb_time.setStyleSheet("")
             self.lb_time.setText(self.t0.strftime("%d/%m/%Y %H:%M:%S") +
                                  self.t0.astimezone(datetime.timezone.utc).strftime("  (%H:%M UTC)"))
             if not self.ed_moyen.text():
@@ -303,11 +384,15 @@ class MainCouranteDock(QDockWidget):
             self._start_clock(force=True)
         rec = {"ts": self.t0.strftime("%d/%m/%Y %H:%M:%S"),
                "utc": self.t0.astimezone(datetime.timezone.utc).strftime("%H:%M"),
-               "sens": self.cb_sens.currentText(), "de": self.ed_de.text().strip().upper(),
-               "a": self.ed_a.text().strip().upper(), "moyen": self.ed_moyen.text().strip(),
+               "sens": self.cb_sens.currentText(), "type": self.cb_type.text(), "de": self.ed_de.text(),
+               "a": self.ed_a.text(), "moyen": self.ed_moyen.text(),
                "prio": self.cb_prio.currentText(), "message": msg, "suite": self.ed_suite.text().strip(),
                "operateur": self.ed_op.text().strip()}
         n = self.journal.add(op, rec)
+        rig = [self._rig_moyen()] if self._rig_moyen() else []
+        for cb in (self.ed_de, self.ed_a, self.cb_type, self.ed_op):
+            cb.remember()
+        self.ed_moyen.remember(rig)
         self.win.statusBar().showMessage(f"Main courante : message n° {n} enregistré")
         self.clear_form()
         self.refresh()
@@ -316,11 +401,14 @@ class MainCouranteDock(QDockWidget):
         self.ed_msg.blockSignals(True)
         self.ed_msg.clear()
         self.ed_msg.blockSignals(False)
+        self._filling = True
         for ed in (self.ed_de, self.ed_a, self.ed_suite, self.ed_moyen):
-            ed.clear()
+            ed.setText("")
+        self.cb_type.setText("Message")
+        self._filling = False
         self.cb_prio.setCurrentIndex(0)
         self.t0 = None
-        self.lb_time.setText("—")
+        self._live_clock()
         self.ed_msg.setFocus()
 
     # --- tableau --------------------------------------------------------------------------
@@ -447,6 +535,8 @@ class MainCouranteDock(QDockWidget):
                     .replace("{MYCALL}", (self.win.settings.value("mycall", "") or "").upper())
                     .replace("{OPERATEUR}", self.ed_op.text() or "…"))
             self.ed_msg.setPlainText(text)
+            if name in TEMPLATE_TYPE:
+                self.cb_type.setText(TEMPLATE_TYPE[name])
             self.ed_msg.setFocus()
         self.cb_tpl.setCurrentIndex(0)
 
@@ -528,7 +618,7 @@ class MainCouranteDock(QDockWidget):
             moyen = r.get("mode") or ""
         now = datetime.datetime.now().astimezone()
         rec = {"ts": now.strftime("%d/%m/%Y %H:%M:%S"), "utc": now.astimezone(datetime.timezone.utc).strftime("%H:%M"),
-               "sens": "Info", "de": (r.get("station_callsign") or "").upper(), "a": r["call"], "moyen": moyen,
+               "sens": "Info", "type": "QSO", "de": (r.get("station_callsign") or "").upper(), "a": r["call"], "moyen": moyen,
                "prio": "Routine",
                "message": f"QSO avec {r['call']}" + (f" ({r['name']})" if r.get("name") else "")
                           + f", report envoyé {r.get('rst_sent') or '-'}, reçu {r.get('rst_rcvd') or '-'}",
