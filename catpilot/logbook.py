@@ -820,7 +820,7 @@ class LogDock(QDockWidget):
         self.tbl.setIconSize(QSize(24, 18))
         self.tbl.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.tbl.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         self.tbl.horizontalHeader().setStretchLastSection(True)
         v.addWidget(self.tbl, 1)
         h = QHBoxLayout()
@@ -1086,6 +1086,7 @@ class LogDock(QDockWidget):
         q = self.ed_search.text().strip().upper()
         rows = self.log.query("call LIKE ?", (f"%{q}%",), limit=500) if q else self.log.query(limit=300)
         self.rows = rows
+        self.tbl.setUpdatesEnabled(False)
         self.tbl.setRowCount(len(rows))
         for i, r in enumerate(rows):
             d = r["qso_date"] or ""
@@ -1137,6 +1138,8 @@ class LogDock(QDockWidget):
                     it.setText("↑")
                     it.setForeground(QColor("#9e9e9e"))
                     it.setToolTip("Envoyé, pas encore confirmé")
+        self.tbl.resizeColumnsToContents()
+        self.tbl.setUpdatesEnabled(True)
         cc = self.log.confirmed_counts()
         self.lb_count.setText(f"{self.log.count()} QSO · confirmés : eQSL {cc['eqsl']}, LoTW {cc['lotw']}")
 

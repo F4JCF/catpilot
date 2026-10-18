@@ -1577,6 +1577,7 @@ class MainWindow(QMainWindow):
         with self.log.lock:
             rows = self.log.db.execute("SELECT DISTINCT call, band FROM qso").fetchall()
         self._worked = {r[0] for r in rows}
+        self.log_gen = getattr(self, "log_gen", 0) + 1         # les spots recalculent leur couleur
         self._entities = None
         self._confirmed = None
 

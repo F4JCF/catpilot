@@ -1,3 +1,4 @@
-Nouveautés de la 0.23.2 :
-- Plusieurs indicatifs : en haut du carnet, « Je trafique en » permet de choisir l'indicatif des prochains QSO (F4JCF, F4JCF/P, FR/F4JCF/P, TK/F4JCF…). Tapez-en un nouveau puis Entrée pour l'ajouter à la liste ; « Retirer » l'enlève. Le sens est rappelé à côté (portable, mobile, depuis La Réunion…).
-- L'indicatif choisi sert pour le carnet (station), les messages CW, les étiquettes QSL et PSK Reporter ; le DX cluster et le RBN utilisent l'indicatif principal. Il s'affiche en bas de la fenêtre.
+Nouveautés de la 0.23.3 :
+- DX cluster beaucoup plus fluide : la liste des spots n'est plus redessinée à chaque spot reçu, mais regroupée (moins d'une fois par seconde), seulement quand le panneau est affiché, et limitée aux 200 derniers spots. Le logiciel ne se fige plus avec un cluster très actif.
+- Alertes du cluster : une seule alerte par indicatif et par heure ; son et voix au plus toutes les 15 secondes. Pas d'alerte « nouveau pays » quand le carnet est vide.
+- Carnet : affichage de la liste plus rapide.

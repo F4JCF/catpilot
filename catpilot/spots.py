@@ -294,6 +294,11 @@ class SpotsDock(QDockWidget):
         self.psk.done.connect(self.on_psk)
         self.psk_timer = QTimer(self)
         self.psk_timer.timeout.connect(self._psk_fetch)
+        self._dirty = set()
+        self._alerted, self._last_ring = {}, 0.0
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setSingleShot(True)
+        self._refresh_timer.timeout.connect(self._do_refresh)
         self.fetcher = Fetcher()
         self.fetcher.done.connect(self.on_fetched)
         self.cluster = DxCluster()
@@ -397,7 +402,7 @@ class SpotsDock(QDockWidget):
             t.verticalHeader().setVisible(False)
             t.setEditTriggers(QAbstractItemView.NoEditTriggers)
             t.setSelectionBehavior(QAbstractItemView.SelectRows)
-            t.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+            t.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
             t.horizontalHeader().setStretchLastSection(True)
             if key != "me":
                 t.cellDoubleClicked.connect(lambda r, _c, k=key: self.tune(k, r))
@@ -434,6 +439,8 @@ class SpotsDock(QDockWidget):
         self.timer.timeout.connect(self.refresh_now)
         self._arm_timer()
         self.visibilityChanged.connect(lambda vis: vis and not self.data["pota"] and self.refresh_now())
+        self.visibilityChanged.connect(lambda vis: vis and self.refresh_tables())
+        self.tabs.currentChanged.connect(lambda _i: self.refresh_tables())
 
     # --- balises NCDXF ----------------------------------------------------------------------
     def _build_beacons(self):
@@ -615,14 +622,20 @@ class SpotsDock(QDockWidget):
         why = self.alert_reason(sp)
         if why:
             sp["alert"] = why
-            self.alerts += 1
-            self.tabs.setTabText(2, f"DX cluster ({self.alerts} alerte{'s' if self.alerts > 1 else ''})")
-            self.win.statusBar().showMessage(
-                f"Alerte : {sp['call']} sur {sp['hz'] / 1e3:.1f} kHz {sp['mode']} — {why}", 20000)
-            if self.ck_beep.isChecked():
-                QApplication.beep()
-            if hasattr(self.win, "say_alert"):
-                self.win.say_alert(sp, why)
+            now = time.time()
+            seen = self._alerted.get(sp["call"])
+            if not seen or now - seen > 3600:          # une seule alerte par indicatif et par heure
+                self._alerted[sp["call"]] = now
+                self.alerts += 1
+                self.tabs.setTabText(2, f"DX cluster ({self.alerts} alerte{'s' if self.alerts > 1 else ''})")
+                self.win.statusBar().showMessage(
+                    f"Alerte : {sp['call']} sur {sp['hz'] / 1e3:.1f} kHz {sp['mode']} — {why}", 20000)
+                if now - self._last_ring > 15:          # son et voix : au plus toutes les 15 s
+                    self._last_ring = now
+                    if self.ck_beep.isChecked():
+                        QApplication.beep()
+                    if hasattr(self.win, "say_alert"):
+                        self.win.say_alert(sp, why)
         lst = self.data["dx"]
         lst[:] = [x for x in lst if not (x["call"] == sp["call"] and abs(x["hz"] - sp["hz"]) < 2000)]
         sp.setdefault("t", time.time())
@@ -639,6 +652,8 @@ class SpotsDock(QDockWidget):
         if self.win.settings.value("alert_es", "true") not in (True, "true"):
             return
         now = time.time()
+        if not 50_000_000 <= lst[0]["hz"] <= 54_000_000:
+            return
         recent = {x["call"] for x in lst if 50_000_000 <= x["hz"] <= 54_000_000 and now - x.get("t", 0) < 900
                   and (cty.lookup(x["call"]) or {}).get("cont") == "EU"}
         if len(recent) >= 4 and now - getattr(self, "_six_alert", 0) > 3 * 3600:
@@ -653,6 +668,8 @@ class SpotsDock(QDockWidget):
         if watch and wildcard_match(call, watch):
             return "indicatif surveillé"
         if not (self.ck_new.isChecked() or self.ck_newband.isChecked()):
+            return ""
+        if not self.win.worked_entities():          # carnet vide : tout serait « nouveau »
             return ""
         ent = cty.dxcc(call)
         if not ent:
@@ -856,52 +873,90 @@ class SpotsDock(QDockWidget):
 
     STATUS_STYLE = {"new": ("#ff5252", 60), "newband": ("#ffab40", 45), "unconf": ("#ffd740", 30)}
 
+    MAX_ROWS = 200
+
     def refresh_tables(self, only=None):
+        """Remplit les tableaux. Appelé souvent (chaque spot) : regroupé, et seulement si le panneau est visible."""
+        if only and isinstance(only, str):
+            self._dirty.add(only)
+        else:
+            self._dirty.update(k for k in self.tables if k != "me")
+        if not self.isVisible():
+            return
+        if not self._refresh_timer.isActive():
+            self._refresh_timer.start(700)
+
+    def _do_refresh(self):
+        if not self.isVisible():
+            return
         from .qsl import country_of, flag_icon
         pos = getattr(self.win, "station", None)
-        for key, t in self.tables.items():
-            if key == "me" or (only and isinstance(only, str) and key != only):
-                continue
-            rows = [sp for sp in self.data[key] if self._visible(sp)]
+        gen = getattr(self.win, "log_gen", 0)
+        cur_tab = ["pota", "sota", "dx", "me", "beacons"][self.tabs.currentIndex()] \
+            if self.tabs.currentIndex() < 5 else ""
+        keys = [k for k in self._dirty if k == cur_tab] or []      # l'onglet affiché d'abord
+        for key in keys:
+            self._dirty.discard(key)
+            t = self.tables[key]
+            rows = [sp for sp in self.data[key] if self._visible(sp)][:self.MAX_ROWS]
             t.setProperty("rows", rows)
+            t.setUpdatesEnabled(False)
             t.setRowCount(len(rows))
             for i, sp in enumerate(rows):
-                dist = ""
-                if pos and sp.get("grid"):
-                    try:
-                        d, b = distance_bearing(*pos, *from_locator(sp["grid"]))
-                        dist = f"{d:.0f} km  {b:.0f}°"
-                    except ValueError:
-                        pass
+                if "_iso" not in sp:
+                    sp["_iso"], sp["_country"] = country_of(sp["call"])
+                if sp.get("_gen") != gen:
+                    sp["_gen"], sp["_stat"] = gen, self.spot_status(sp)
+                    sp["_worked"] = self.win.worked_before(sp["call"])
+                stat = sp["_stat"]
+                dist = sp.get("_dist")
+                if dist is None:
+                    dist = ""
+                    if pos and sp.get("grid"):
+                        try:
+                            d, b = distance_bearing(*pos, *from_locator(sp["grid"]))
+                            dist = f"{d:.0f} km  {b:.0f}°"
+                        except ValueError:
+                            pass
+                    sp["_dist"] = dist
                 info = " — ".join(x for x in (sp.get("info"), sp.get("where")) if x)
-                iso, country = country_of(sp["call"])
-                stat = self.spot_status(sp)
-                vals = [sp["time"], sp["call"], country, f"{sp['hz'] / 1e3:.1f}".replace(".", ","), sp["mode"],
-                        sp["ref"], info, dist]
+                vals = [sp["time"], sp["call"], sp["_country"], f"{sp['hz'] / 1e3:.1f}".replace(".", ","),
+                        sp["mode"], sp["ref"], info, dist]
+                bg = fg = None
+                tip = ""
+                if stat in self.STATUS_STYLE:
+                    col, alpha = self.STATUS_STYLE[stat]
+                    bg = QColor(col)
+                    bg.setAlpha(alpha)
+                    tip = {"new": "Nouveau pays DXCC", "newband": "Pays jamais contacté sur cette bande",
+                           "unconf": "Pays contacté mais pas encore confirmé (QSL, eQSL, LoTW)"}[stat]
+                if sp.get("alert"):
+                    fg, tip = QColor("#ff9a2e"), "Alerte : " + sp["alert"]
+                elif stat == "worked" or sp.get("_worked"):
+                    fg = QColor("#7a7a7a")
                 for c, val in enumerate(vals):
                     it = QTableWidgetItem(val)
                     if c == 2:
-                        ic = flag_icon(iso)
+                        ic = flag_icon(sp["_iso"])
                         if ic:
                             it.setIcon(ic)
-                    if c == 3:
+                    elif c == 3:
                         it.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                    if stat in self.STATUS_STYLE:
-                        col, alpha = self.STATUS_STYLE[stat]
-                        bg = QColor(col)
-                        bg.setAlpha(alpha)
+                    if bg is not None:
                         it.setBackground(bg)
-                        it.setToolTip({"new": "Nouveau pays DXCC", "newband": "Pays jamais contacté sur cette bande",
-                                       "unconf": "Pays contacté mais pas encore confirmé (QSL, eQSL, LoTW)"}[stat])
-                    if sp.get("alert"):
-                        it.setForeground(QColor("#ff9a2e"))
-                        f = QFont(it.font())
-                        f.setBold(True)
-                        it.setFont(f)
-                        it.setToolTip("Alerte : " + sp["alert"])
-                    elif stat == "worked" or self.win.worked_before(sp["call"]):
-                        it.setForeground(QColor("#7a7a7a"))
+                    if fg is not None:
+                        it.setForeground(fg)
+                        if sp.get("alert"):
+                            f = QFont(it.font())
+                            f.setBold(True)
+                            it.setFont(f)
+                    if tip:
+                        it.setToolTip(tip)
                     t.setItem(i, c, it)
+            if len(rows) != t.property("sized"):
+                t.setProperty("sized", len(rows))
+                t.resizeColumnsToContents()
+            t.setUpdatesEnabled(True)
 
     def tune(self, key, row):
         rows = self.tables[key].property("rows") or []
