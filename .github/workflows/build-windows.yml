@@ -29,7 +29,7 @@ jobs:
           fi
           python -c "import ctypes; ctypes.CDLL(r'catpilot/ft8lib.dll'); print('ft8lib OK')" 2>&1 | sed 's/^/::notice::/'
           python -c "import ctypes; ctypes.CDLL(r'catpilot/ft8lib.dll')" || { echo "::error::ft8lib.dll ne se charge pas"; exit 1; }
-      - run: pyinstaller --noconfirm --onefile --windowed --name CATPilot --icon assets/catpilot.ico --add-data "assets;assets" --add-binary "catpilot/ft8lib.dll;." --collect-all pyrtlsdrlib --collect-all sstv run.py
+      - run: pyinstaller --noconfirm --onefile --windowed --name CATPilot --icon assets/catpilot.ico --add-data "assets;assets" --add-binary "catpilot/ft8lib.dll;." --collect-all pyrtlsdrlib --collect-all sstv --hidden-import PySide6.QtTextToSpeech run.py
       - name: Auto-test de l'exécutable (FT8, FT4, PSK31, RTTY, SSTV)
         shell: bash
         run: |

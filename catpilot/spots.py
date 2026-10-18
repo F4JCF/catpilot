@@ -405,6 +405,8 @@ class SpotsDock(QDockWidget):
                 f"Alerte : {sp['call']} sur {sp['hz'] / 1e3:.1f} kHz {sp['mode']} — {why}", 20000)
             if self.ck_beep.isChecked():
                 QApplication.beep()
+            if hasattr(self.win, "say_alert"):
+                self.win.say_alert(sp, why)
         lst = self.data["dx"]
         lst[:] = [x for x in lst if not (x["call"] == sp["call"] and abs(x["hz"] - sp["hz"]) < 2000)]
         lst.insert(0, sp)

@@ -1,4 +1,5 @@
 """Interface graphique de CAT Pilot pour Yaesu FT-991A."""
+import base64
 import datetime
 import json
 import math
@@ -7,7 +8,7 @@ import sys
 import time
 
 import serial.tools.list_ports
-from PySide6.QtCore import QPointF, QRectF, QSettings, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QByteArray, QPointF, QRectF, QSettings, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup, QColor, QFont, QFontMetrics, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
     QProxyStyle, QStyle,
@@ -166,6 +167,43 @@ class FreqDisplay(QLabel):
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.setToolTip("Molette sur un chiffre pour le régler")
         self.default_step = 100
+        self.setMouseTracking(True)
+        self._hover = None
+
+    def _index_at(self, x):
+        txt = self.text()
+        if not txt:
+            return None
+        w = QFontMetrics(self.font()).horizontalAdvance(txt)
+        idx = int((x - (self.width() - w) / 2) // (w / len(txt)))
+        return idx if 0 <= idx < len(txt) and txt[idx].isdigit() else None
+
+    def mouseMoveEvent(self, e):
+        i = self._index_at(e.position().x())
+        if i != self._hover:
+            self._hover = i
+            self.update()
+
+    def leaveEvent(self, _e):
+        self._hover = None
+        self.update()
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        if self._hover is None:
+            return
+        txt = self.text()
+        fm = QFontMetrics(self.font())
+        w = fm.horizontalAdvance(txt)
+        cw = w / len(txt)
+        x0 = (self.width() - w) / 2 + self._hover * cw
+        p = QPainter(self)
+        c = QColor(GREEN)
+        c.setAlpha(200)
+        p.setPen(QPen(c, 3))
+        y = (self.height() + fm.ascent()) / 2 + 4
+        p.drawLine(int(x0 + 2), int(y), int(x0 + cw - 2), int(y))
+        p.end()
 
     def set_freq(self, hz):
         mhz, rest = divmod(int(hz), 1_000_000)
@@ -312,7 +350,13 @@ class MainWindow(QMainWindow):
         self.mapdock = MapDock(self)
         self.mc = MainCouranteDock(self)
         self.digi = DigiDock(self)
-        for dock, btn in ((self.digi, self.b_digi), (self.mc, self.b_mc), (self.mapdock, self.b_map), (self.remote, self.b_remote), (self.sat, self.b_sat), (self.sdr, self.b_sdr), (self.rotor, self.b_rot), (self.cw, self.b_cw), (self.dvk, self.b_dvk), (self.txa, self.b_txa),
+        from .extras import BigWaterfallDock
+        self.bigwf = BigWaterfallDock(self)
+        self.b_bigwf = QPushButton("Panoramique")
+        self.b_bigwf.setCheckable(True)
+        self.b_bigwf.setToolTip("Grande chute d'eau détachable")
+        self.dock_buttons = self.dock_buttons + (self.b_bigwf,)
+        for dock, btn in ((self.bigwf, self.b_bigwf), (self.digi, self.b_digi), (self.mc, self.b_mc), (self.mapdock, self.b_map), (self.remote, self.b_remote), (self.sat, self.b_sat), (self.sdr, self.b_sdr), (self.rotor, self.b_rot), (self.cw, self.b_cw), (self.dvk, self.b_dvk), (self.txa, self.b_txa),
                           (self.spots, self.b_spots), (self.logdock, self.b_log), (self.wsjtx, self.b_wsjtx)):
             self.addDockWidget(Qt.RightDockWidgetArea, dock)
             self.tabifyDockWidget(self.mem, dock)
@@ -320,6 +364,7 @@ class MainWindow(QMainWindow):
             btn.toggled.connect(dock.setVisible)
             dock.visibilityChanged.connect(btn.setChecked)
         self._build_toolbar_and_menus()
+        self._build_extras()
         self.compact = CompactWindow(self, FreqDisplay, BANDS, MODE_LABELS)
         self.compact.restore.connect(self.restore_from_compact)
         self.nmea = NmeaReader()
@@ -480,6 +525,9 @@ class MainWindow(QMainWindow):
         self.cb_step.setCurrentIndex(1)
         self.cb_step.currentIndexChanged.connect(self.on_step)
         h.addWidget(self.ed_freq, 1)
+        self.b_recent = QPushButton("Récents")
+        self.b_recent.setToolTip("Les 10 dernières fréquences utilisées : un clic pour y revenir")
+        h.addWidget(self.b_recent)
         h.addWidget(QLabel("Pas"))
         h.addWidget(self.cb_step)
         vl.addLayout(h)
@@ -786,6 +834,12 @@ class MainWindow(QMainWindow):
         s.setValue("server", "true" if self.ck_srv.isChecked() else "false")
         s.setValue("band_mem", json.dumps(self.band_mem))
         s.setValue("geometry", self.saveGeometry())
+        s.setValue("dock_state", base64.b64encode(bytes(self.saveState())).decode())
+        self.qsy.save(s)
+        s.setValue("wf_size", self.wf_size)
+        s.setValue("freq_size", self.freq_size)
+        s.setValue("speak_freq", self.announcer.enabled)
+        s.setValue("speak_alerts", self.speak_alerts)
         s.setValue("audio", self.cb_audio.currentText())
         s.setValue("auto_connect", "true" if self.ck_auto.isChecked() else "false")
         s.setValue("power_on", "true" if self.ck_on.isChecked() else "false")
@@ -1083,7 +1137,7 @@ class MainWindow(QMainWindow):
         self.update_clock()
 
         mb = self.menuBar()
-        m = mb.addMenu("Poste")
+        m = self.menu_poste = mb.addMenu("Poste")
         for label, slot in (("Allumer et connecter", self.power_on_connect),
                             ("Éteindre et déconnecter", self.power_off_disconnect), (None, None),
                             ("Sauvegarder les menus du poste…", self.backup_menus),
@@ -1095,7 +1149,7 @@ class MainWindow(QMainWindow):
             a = QAction(label, self)
             a.triggered.connect(slot)
             m.addAction(a)
-        aff = mb.addMenu("Affichage")
+        aff = self.menu_aff = mb.addMenu("Affichage")
         for label, btn in (("Spots POTA, SOTA et DX", self.b_spots), ("Carte et ligne grise", self.b_map),
                            ("Carnet de trafic", self.b_log), ("Modes numériques (FT8, RTTY, PSK31, SSTV)", self.b_digi),
                            ("WSJT-X", self.b_wsjtx), ("Mémoires et scan", self.b_mems),
@@ -1469,6 +1523,106 @@ class MainWindow(QMainWindow):
         if ok or err:
             self.statusBar().showMessage(f"{SERVICES[svc]} : {ok} QSO envoyé{'s' if ok > 1 else ''}"
                                          + (f", {err} en erreur" if err else ""), 10000)
+
+    # --- confort : affichage, voix, dispositions -----------------------------------------------------
+    def _build_extras(self):
+        from .extras import FreqAnnouncer, Layouts, QsyHistory, Speaker, StatusInfo
+        s = self.settings
+        self.speaker = Speaker()
+        self.status_info = StatusInfo(self)
+        self.qsy = QsyHistory(self, self.b_recent)
+        self.announcer = FreqAnnouncer(self, self.speaker)
+        self.announcer.enabled = s.value("speak_freq", "false") in (True, "true")
+        self.speak_alerts = s.value("speak_alerts", "false") in (True, "true")
+        from .scheduler import Scheduler
+        self.scheduler = Scheduler(self)
+        a = QAction("Programmateur (réglage à heure fixe)…", self)
+        a.triggered.connect(self.scheduler_dialog)
+        self.menu_poste.addSeparator()
+        self.menu_poste.addAction(a)
+        aff = self.menu_aff
+        aff.addSeparator()
+        a = QAction("Grand panoramique (chute d'eau détachable)", self)
+        a.triggered.connect(lambda: self.b_bigwf.setChecked(True))
+        aff.addAction(a)
+        m = aff.addMenu("Hauteur de la chute d'eau")
+        grp = QActionGroup(self)
+        self.wf_size = s.value("wf_size", "normale") or "normale"
+        for key, label in (("petite", "Petite"), ("normale", "Normale"), ("grande", "Grande")):
+            a = QAction(label, self, checkable=True)
+            a.setChecked(key == self.wf_size)
+            a.triggered.connect(lambda _c=False, k=key: self.set_wf_size(k))
+            grp.addAction(a)
+            m.addAction(a)
+        m = aff.addMenu("Taille de l'afficheur de fréquence")
+        grp = QActionGroup(self)
+        self.freq_size = int(s.value("freq_size", 100))
+        for pct in (100, 125, 150, 175):
+            a = QAction(f"{pct} %", self, checkable=True)
+            a.setChecked(pct == self.freq_size)
+            a.triggered.connect(lambda _c=False, v=pct: self.set_freq_size(v))
+            grp.addAction(a)
+            m.addAction(a)
+        self.layouts = Layouts(self, aff.addMenu("Dispositions des panneaux"))
+        self.act_full = QAction("Plein écran (gros boutons)", self, checkable=True)
+        self.act_full.setShortcut("F11")
+        self.act_full.toggled.connect(self.set_fullscreen)
+        aff.addAction(self.act_full)
+        voice = aff.addMenu("Annonces vocales")
+        a = QAction("Fréquence et mode après chaque réglage", self, checkable=True)
+        a.setChecked(self.announcer.enabled)
+        a.toggled.connect(lambda on: setattr(self.announcer, "enabled", on))
+        voice.addAction(a)
+        a = QAction("Alertes du DX cluster", self, checkable=True)
+        a.setChecked(self.speak_alerts)
+        a.toggled.connect(lambda on: setattr(self, "speak_alerts", on))
+        voice.addAction(a)
+        a = QAction("Essayer la voix", self)
+        a.triggered.connect(lambda: self.speaker.say("CAT Pilot, annonces vocales actives. 73."))
+        voice.addAction(a)
+        st = s.value("dock_state", "")
+        if st:
+            try:
+                self.restoreState(QByteArray(base64.b64decode(st)))
+            except Exception:
+                pass
+        self.set_wf_size(self.wf_size)
+        self.set_freq_size(self.freq_size)
+
+    def scheduler_dialog(self):
+        from .scheduler import SchedulerDialog
+        SchedulerDialog(self).exec()
+
+    def set_wf_size(self, key):
+        self.wf_size = key
+        self.wf.setMinimumHeight({"petite": 70, "normale": 100, "grande": 230}.get(key, 100))
+
+    def set_freq_size(self, pct):
+        self.freq_size = pct
+        self.freq.setStyleSheet("" if pct == 100 else f"font-size: {38 * self.text_scale() * pct / 100:.0f}pt;")
+
+    def set_fullscreen(self, on):
+        if on:
+            self._scale_before = self.size_group.checkedAction()
+            big = next((a for a in self.size_group.actions() if abs(a.data() - 1.3) < 0.01), None)
+            if big:
+                big.setChecked(True)
+            self.apply_look()
+            QApplication.instance().setStyleSheet(QApplication.instance().styleSheet() +
+                                                  "QPushButton { min-height: 34px; }")
+            self.showFullScreen()
+        else:
+            if getattr(self, "_scale_before", None):
+                self._scale_before.setChecked(True)
+            self.apply_look()
+            self.showNormal()
+        self.set_freq_size(self.freq_size)
+
+    def say_alert(self, sp, why):
+        if self.speak_alerts:
+            call = " ".join(sp["call"])
+            from .extras import spoken_freq
+            self.speaker.say(f"Alerte. {call}, {spoken_freq(sp['hz'])}. {why}")
 
     def worked_entities(self):
         """Pays DXCC déjà contactés : {préfixe : {bandes}}."""
@@ -1860,6 +2014,8 @@ class MainWindow(QMainWindow):
             return
         self._last = st
         self._state_time = time.monotonic()
+        for hook in (self.status_info.on_state, self.qsy.on_state, self.announcer.on_state):
+            hook(st)
         self.bandplan.set_freq(st.freq, st.ptt)
         self._check_out_of_band(st)
         gps = st.p.get("gps")
