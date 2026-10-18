@@ -42,8 +42,13 @@ def data_dir():
     return d
 
 
+UP_COLS = ("up_qrz", "up_eqsl", "up_clublog", "up_lotw")
+
+
 class Log(QObject):
     changed = Signal()
+    added = Signal(int)                     # identifiant du QSO ajouté
+    fields = FIELDS
 
     def __init__(self, path=None):
         super().__init__()
@@ -54,9 +59,11 @@ class Log(QObject):
         with self.lock:
             self.db.execute(f"CREATE TABLE IF NOT EXISTS qso (id INTEGER PRIMARY KEY, {cols})")
             have = {r[1] for r in self.db.execute("PRAGMA table_info(qso)")}
-            for f in FIELDS:
+            for f in FIELDS + list(UP_COLS):
                 if f not in have:
                     self.db.execute(f"ALTER TABLE qso ADD COLUMN {f} TEXT")
+                    if f in UP_COLS:          # les QSO déjà présents ne sont pas envoyés d'office
+                        self.db.execute(f"UPDATE qso SET {f} = 'ancien'")
             self.db.execute("CREATE INDEX IF NOT EXISTS qso_call ON qso(call)")
             self.db.commit()
 
@@ -67,11 +74,47 @@ class Log(QObject):
             rec["band"] = band_of_mhz(rec["freq"])
         keys = list(rec)
         with self.lock:
-            self.db.execute(f"INSERT INTO qso ({', '.join(keys)}) VALUES ({', '.join('?' * len(keys))})",
-                            [rec[k] for k in keys])
+            cur = self.db.execute(f"INSERT INTO qso ({', '.join(keys)}) VALUES ({', '.join('?' * len(keys))})",
+                                  [rec[k] for k in keys])
             self.db.commit()
+            qid = cur.lastrowid
         if notify:
             self.changed.emit()
+            self.added.emit(qid)
+        return qid
+
+    def pending(self, svc, ids=None):
+        """QSO pas encore envoyés à ce service (QRZ, eQSL, Club Log, LoTW)."""
+        col = f"up_{svc}"
+        where, args = f"({col} IS NULL OR {col} = '')", ()
+        if ids:
+            where += f" AND id IN ({', '.join('?' * len(ids))})"
+            args = tuple(ids)
+        return list(reversed(self.query(where, args)))
+
+    def reset_upload(self, svc):
+        """Tout le carnet sera renvoyé à ce service."""
+        with self.lock:
+            self.db.execute(f"UPDATE qso SET up_{svc} = NULL")
+            self.db.commit()
+
+    def mark_all_uploaded(self, ids, value="import"):
+        with self.lock:
+            for qid in ids:
+                self.db.execute("UPDATE qso SET up_qrz = ?, up_eqsl = ?, up_clublog = ?, up_lotw = ? WHERE id = ?",
+                                (value, value, value, value, qid))
+            self.db.commit()
+
+    def mark_uploaded(self, qid, svc):
+        with self.lock:
+            self.db.execute(f"UPDATE qso SET up_{svc} = ? WHERE id = ?",
+                            (datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d"), qid))
+            self.db.commit()
+
+    def upload_counts(self):
+        with self.lock:
+            return {c[3:]: self.db.execute(f"SELECT COUNT(*) FROM qso WHERE {c} IS NULL OR {c} = ''").fetchone()[0]
+                    for c in UP_COLS}
 
     def delete(self, qid):
         with self.lock:
@@ -482,7 +525,9 @@ class LogDock(QDockWidget):
         v.addWidget(self.tbl, 1)
         h = QHBoxLayout()
         for label, slot in (("Supprimer", self.delete_selected), ("Importer ADIF", self.import_adif),
-                            ("Exporter ADIF", self.export_adif), ("Exporter une activation", self.export_activation)):
+                            ("Exporter ADIF", self.export_adif), ("Exporter une activation", self.export_activation),
+                            ("Envoi en ligne…", lambda: self.win.upload_dialog()),
+                            ("Diplômes…", lambda: self.win.awards_dialog())):
             b = QPushButton(label)
             b.clicked.connect(slot)
             h.addWidget(b)
@@ -664,6 +709,7 @@ class LogDock(QDockWidget):
         with open(path, encoding="utf-8", errors="replace") as f:
             recs = adif.parse(f.read())
         n = dup = 0
+        new_ids = []
         for r in recs:
             if not r.get("call"):
                 continue
@@ -672,8 +718,13 @@ class LogDock(QDockWidget):
             if self.log.is_dupe(r):
                 dup += 1
                 continue
-            self.log.add(r, notify=False)
+            new_ids.append(self.log.add(r, notify=False))
             n += 1
+        if new_ids and QMessageBox.question(
+                self, "Import ADIF", f"{n} QSO importés. Faut-il aussi les envoyer aux carnets en ligne "
+                "(QRZ.com, eQSL, Club Log, LoTW) lors du prochain envoi ?\n\n"
+                "Répondez Non s'ils y sont déjà.") != QMessageBox.Yes:
+            self.log.mark_all_uploaded(new_ids)
         self.log.changed.emit()
         QMessageBox.information(self, "Import ADIF", f"{n} QSO importés, {dup} doublons ignorés.")
 

@@ -23,6 +23,7 @@ from .drivers import DRIVERS
 from .drivers.sim import SimDriver
 from .docks import CwDock, MenuEditor, TxAudioDock
 from .mapdock import MapDock
+from .maincourante import MainCouranteDock
 from .memdock import MemoryDock, backup_dir
 from .propagation import FR as PROP_FR, Propagation
 from .updater import PAGE as RELEASES_PAGE, Updater, can_self_update, install_and_restart, is_newer
@@ -265,6 +266,11 @@ class MainWindow(QMainWindow):
         self.toggles, self.sliders, self.combos = {}, {}, {}
         self.extra_toggles = []
         self.log = Log()
+        from .upload import Uploader
+        self.uploader = Uploader(self.log, self.settings)
+        self.log.added.connect(self._auto_upload)
+        self.uploader.progress.connect(lambda m: self.statusBar().showMessage(m, 8000))
+        self.uploader.finished.connect(self._upload_done)
         self._worked = set()
         self._entities = None
         self.log.changed.connect(self._reload_worked)
@@ -303,7 +309,8 @@ class MainWindow(QMainWindow):
         self.sdr = SdrDock(self)
         self.remote = RemoteDock(self)
         self.mapdock = MapDock(self)
-        for dock, btn in ((self.mapdock, self.b_map), (self.remote, self.b_remote), (self.sat, self.b_sat), (self.sdr, self.b_sdr), (self.rotor, self.b_rot), (self.cw, self.b_cw), (self.dvk, self.b_dvk), (self.txa, self.b_txa),
+        self.mc = MainCouranteDock(self)
+        for dock, btn in ((self.mc, self.b_mc), (self.mapdock, self.b_map), (self.remote, self.b_remote), (self.sat, self.b_sat), (self.sdr, self.b_sdr), (self.rotor, self.b_rot), (self.cw, self.b_cw), (self.dvk, self.b_dvk), (self.txa, self.b_txa),
                           (self.spots, self.b_spots), (self.logdock, self.b_log), (self.wsjtx, self.b_wsjtx)):
             self.addDockWidget(Qt.RightDockWidgetArea, dock)
             self.tabifyDockWidget(self.mem, dock)
@@ -708,8 +715,11 @@ class MainWindow(QMainWindow):
         self.b_remote.setCheckable(True)
         self.b_map = QPushButton("Carte")
         self.b_map.setCheckable(True)
+        self.b_mc = QPushButton("Main courante")
+        self.b_mc.setCheckable(True)
+        self.b_mc.setToolTip("Journal horodaté des messages (ADRASEC, sécurité civile)")
         self.dock_buttons = (self.b_spots, self.b_map, self.b_log, self.b_wsjtx, self.b_mems, self.b_cw,
-                             self.b_dvk, self.b_txa, self.b_rot, self.b_sat, self.b_sdr, self.b_remote)
+                             self.b_dvk, self.b_txa, self.b_rot, self.b_sat, self.b_sdr, self.b_remote, self.b_mc)
         lv.addLayout(ll)
         lo = QHBoxLayout()
         self.ck_auto = QCheckBox("Se connecter au lancement du logiciel")
@@ -795,6 +805,7 @@ class MainWindow(QMainWindow):
         self.dvk.save_settings(s)
         self.spots.save_settings(s)
         self.mapdock.save_settings(s)
+        self.mc.save_settings(s)
         self.logdock.save_settings(s)
         self.wsjtx.save_settings(s)
         self.rotor.save_settings(s)
@@ -1085,7 +1096,7 @@ class MainWindow(QMainWindow):
                            ("CW au clavier", self.b_cw), ("Messages vocaux", self.b_dvk),
                            ("Audio d'émission", self.b_txa), ("Rotor d'antenne", self.b_rot),
                            ("Satellites", self.b_sat), ("Panoramique SDR", self.b_sdr),
-                           ("Accès à distance", self.b_remote)):
+                           ("Accès à distance", self.b_remote), ("Main courante (ADRASEC)", self.b_mc)):
             a = QAction(label, self)
             a.triggered.connect(lambda _c=False, b=btn: b.setChecked(True))
             aff.addAction(a)
@@ -1132,6 +1143,9 @@ class MainWindow(QMainWindow):
                             ("Importer un fichier ADIF…", lambda: self.logdock.import_adif()),
                             ("Exporter tout le carnet en ADIF…", lambda: self.logdock.export_adif()),
                             ("Exporter l'activation du jour (POTA/SOTA)…", lambda: self.logdock.export_activation()),
+                            (None, None),
+                            ("Envoi en ligne : QRZ.com, eQSL, Club Log, LoTW…", self.upload_dialog),
+                            ("Diplômes et statistiques…", self.awards_dialog),
                             (None, None),
                             ("Réglages : indicatif, QRZ.com et HamQTH…", self.log_settings)):
             if label is None:
@@ -1426,6 +1440,26 @@ class MainWindow(QMainWindow):
             rows = self.log.db.execute("SELECT DISTINCT call, band FROM qso").fetchall()
         self._worked = {r[0] for r in rows}
         self._entities = None
+
+    def upload_dialog(self):
+        from .awards import UploadDialog
+        UploadDialog(self).exec()
+
+    def awards_dialog(self):
+        from .awards import AwardsDialog
+        AwardsDialog(self).exec()
+
+    def _auto_upload(self, qid):
+        from .upload import SERVICES
+        for svc in SERVICES:
+            if self.uploader.auto(svc):
+                self.uploader.send(svc, [qid])
+
+    def _upload_done(self, svc, ok, err):
+        from .upload import SERVICES
+        if ok or err:
+            self.statusBar().showMessage(f"{SERVICES[svc]} : {ok} QSO envoyé{'s' if ok > 1 else ''}"
+                                         + (f", {err} en erreur" if err else ""), 10000)
 
     def worked_entities(self):
         """Pays DXCC déjà contactés : {préfixe : {bandes}}."""
