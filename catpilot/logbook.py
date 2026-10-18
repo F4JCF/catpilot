@@ -687,8 +687,8 @@ class LogDock(QDockWidget):
         h.addWidget(self.lb_count)
         v.addLayout(h)
         self.tbl = QTableWidget(0, 13)
-        self.tbl.setHorizontalHeaderLabels(["Date", "UTC", "Indicatif", "Pays", "Fréquence", "Bande", "Mode", "Env.",
-                                            "Reçu", "Nom", "eQSL", "LoTW", "Réf."])
+        self.tbl.setHorizontalHeaderLabels(["Date", "UTC", "Indicatif", "Nom", "Pays", "Fréquence", "Bande", "Mode",
+                                            "Env.", "Reçu", "eQSL", "LoTW", "Réf."])
         self.tbl.horizontalHeaderItem(10).setToolTip("✔ confirmé · ↑ envoyé, en attente de confirmation")
         self.tbl.horizontalHeaderItem(11).setToolTip("✔ confirmé · ↑ envoyé, en attente de confirmation")
         self.tbl.setToolTip("Double-clic sur un QSO pour le modifier ou le supprimer")
@@ -951,14 +951,14 @@ class LogDock(QDockWidget):
                                        ("moi : " + (r["my_sig"] or "") + " " + r["my_sig_info"]) if r["my_sig_info"] else "")
                            if x.strip())
             vals = [f"{d[6:8]}/{d[4:6]}/{d[:4]}" if len(d) == 8 else d, (r["time_on"] or "")[:4],
-                    r["call"], country, fq, r["band"], r["submode"] or r["mode"], r["rst_sent"], r["rst_rcvd"],
-                    r["name"], "", "", ref.strip()]
+                    r["call"], r["name"], country, fq, r["band"], r["submode"] or r["mode"], r["rst_sent"],
+                    r["rst_rcvd"], "", "", ref.strip()]
             for c, val in enumerate(vals):
                 self.tbl.setItem(i, c, QTableWidgetItem(val or ""))
             ic = flag_icon(iso)
             if ic:
-                self.tbl.item(i, 3).setIcon(ic)
-            self.tbl.item(i, 4).setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.tbl.item(i, 4).setIcon(ic)
+            self.tbl.item(i, 5).setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             for c, svc in ((10, "eqsl"), (11, "lotw")):
                 it = self.tbl.item(i, c)
                 it.setTextAlignment(Qt.AlignCenter)
