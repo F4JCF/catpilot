@@ -14,7 +14,8 @@ srcs = [os.path.join(here, "ft8wrap.c")] + sorted(glob.glob(os.path.join(lib, "f
         os.path.join(lib, "common", "monitor.c")]
 out = os.path.join(here, "..", "catpilot", "ft8lib.dll" if os.name == "nt" else "libft8lib.so")
 cc = os.environ.get("CC", "gcc")
-cmd = [cc, "-O3", "-std=gnu11", "-shared", "-o", out, "-I", lib, "-DNDEBUG"] + srcs + ["-lm"]
+cmd = [cc, "-O3", "-std=gnu11", "-shared", "-o", out, "-I", lib, "-DNDEBUG",
+       "-include", os.path.join(here, "compat.h"), "-Werror=implicit-function-declaration"] + srcs + ["-lm"]
 if os.name == "nt":
     cmd += ["-static-libgcc", "-static"]
 else:

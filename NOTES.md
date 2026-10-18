@@ -5,3 +5,4 @@ Nouveau panneau « Numérique » (bouton en bas). Réception par l'audio USB du 
 - RTTY 45 bauds et PSK31 : texte reçu en clair (clic dans la chute d'eau sur le signal), AFC, squelch, texte à émettre et 6 messages programmables (clic droit pour les modifier).
 - SSTV : réception des images avec reconnaissance du mode (Robot, Martin, Scottie, PD), galerie et enregistrement dans Documents/CATPilot/sstv. Émission d'une image de votre choix, avec votre texte écrit dessus.
 - Sans poste (« Signal de test ») : une petite bande FT8 simulée répond à vos appels, pour s'entraîner sans émettre.
+- IC-7300 et IC-9700 : lecture, écriture et sauvegarde des mémoires (IC-9700 : par bande 144 / 430 / 1 200 MHz) et des menus du poste. Les réglages CI-V, la date et l'heure ne sont jamais réécrits. À vérifier sur un vrai poste.
