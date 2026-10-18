@@ -22,6 +22,7 @@ from .controller import RigController
 from .drivers import DRIVERS
 from .drivers.sim import SimDriver
 from .docks import CwDock, MenuEditor, TxAudioDock
+from .mapdock import MapDock
 from .memdock import MemoryDock, backup_dir
 from .propagation import FR as PROP_FR, Propagation
 from .updater import PAGE as RELEASES_PAGE, Updater, can_self_update, install_and_restart, is_newer
@@ -265,6 +266,7 @@ class MainWindow(QMainWindow):
         self.extra_toggles = []
         self.log = Log()
         self._worked = set()
+        self._entities = None
         self.log.changed.connect(self._reload_worked)
         self._reload_worked()
         self._want_backup = False
@@ -300,7 +302,8 @@ class MainWindow(QMainWindow):
         self.sat = SatDock(self)
         self.sdr = SdrDock(self)
         self.remote = RemoteDock(self)
-        for dock, btn in ((self.remote, self.b_remote), (self.sat, self.b_sat), (self.sdr, self.b_sdr), (self.rotor, self.b_rot), (self.cw, self.b_cw), (self.dvk, self.b_dvk), (self.txa, self.b_txa),
+        self.mapdock = MapDock(self)
+        for dock, btn in ((self.mapdock, self.b_map), (self.remote, self.b_remote), (self.sat, self.b_sat), (self.sdr, self.b_sdr), (self.rotor, self.b_rot), (self.cw, self.b_cw), (self.dvk, self.b_dvk), (self.txa, self.b_txa),
                           (self.spots, self.b_spots), (self.logdock, self.b_log), (self.wsjtx, self.b_wsjtx)):
             self.addDockWidget(Qt.RightDockWidgetArea, dock)
             self.tabifyDockWidget(self.mem, dock)
@@ -703,7 +706,9 @@ class MainWindow(QMainWindow):
         self.b_sdr.setCheckable(True)
         self.b_remote = QPushButton("À distance")
         self.b_remote.setCheckable(True)
-        self.dock_buttons = (self.b_spots, self.b_log, self.b_wsjtx, self.b_mems, self.b_cw,
+        self.b_map = QPushButton("Carte")
+        self.b_map.setCheckable(True)
+        self.dock_buttons = (self.b_spots, self.b_map, self.b_log, self.b_wsjtx, self.b_mems, self.b_cw,
                              self.b_dvk, self.b_txa, self.b_rot, self.b_sat, self.b_sdr, self.b_remote)
         lv.addLayout(ll)
         lo = QHBoxLayout()
@@ -716,13 +721,16 @@ class MainWindow(QMainWindow):
             lo.addSpacing(16)
         lo.addStretch()
         lv.addLayout(lo)
-        lb = QHBoxLayout()
+        lb = QGridLayout()
+        lb.setHorizontalSpacing(4)
+        lb.setVerticalSpacing(4)
         t = QLabel("Panneaux :")
         t.setObjectName("hint")
-        lb.addWidget(t)
-        for b in self.dock_buttons:
-            lb.addWidget(b)
-        lb.addStretch()
+        lb.addWidget(t, 0, 0)
+        per_row = 9
+        for i, b in enumerate(self.dock_buttons):
+            lb.addWidget(b, i // per_row, 1 + i % per_row)
+        lb.setColumnStretch(per_row + 1, 1)
         lv.addLayout(lb)
         pl.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         g.addWidget(pl, 3, 0, 1, 4)
@@ -786,6 +794,7 @@ class MainWindow(QMainWindow):
         self.cw.save_settings(s)
         self.dvk.save_settings(s)
         self.spots.save_settings(s)
+        self.mapdock.save_settings(s)
         self.logdock.save_settings(s)
         self.wsjtx.save_settings(s)
         self.rotor.save_settings(s)
@@ -1070,7 +1079,8 @@ class MainWindow(QMainWindow):
             a.triggered.connect(slot)
             m.addAction(a)
         aff = mb.addMenu("Affichage")
-        for label, btn in (("Spots POTA, SOTA et DX", self.b_spots), ("Carnet de trafic", self.b_log),
+        for label, btn in (("Spots POTA, SOTA et DX", self.b_spots), ("Carte et ligne grise", self.b_map),
+                           ("Carnet de trafic", self.b_log),
                            ("WSJT-X", self.b_wsjtx), ("Mémoires et scan", self.b_mems),
                            ("CW au clavier", self.b_cw), ("Messages vocaux", self.b_dvk),
                            ("Audio d'émission", self.b_txa), ("Rotor d'antenne", self.b_rot),
@@ -1413,7 +1423,23 @@ class MainWindow(QMainWindow):
     # --- carnet, spots, rotor -----------------------------------------------------------------
     def _reload_worked(self):
         with self.log.lock:
-            self._worked = {r[0] for r in self.log.db.execute("SELECT DISTINCT call FROM qso")}
+            rows = self.log.db.execute("SELECT DISTINCT call, band FROM qso").fetchall()
+        self._worked = {r[0] for r in rows}
+        self._entities = None
+
+    def worked_entities(self):
+        """Pays DXCC déjà contactés : {préfixe : {bandes}}."""
+        if self._entities is None:
+            from . import cty
+            with self.log.lock:
+                rows = self.log.db.execute("SELECT DISTINCT call, band FROM qso").fetchall()
+            ent = {}
+            for call, band in rows:
+                e = cty.dxcc(call or "")
+                if e:
+                    ent.setdefault(e["prefix"], set()).add(band or "")
+            self._entities = ent
+        return self._entities
 
     def worked_before(self, call):
         return call.upper() in self._worked
@@ -1512,6 +1538,8 @@ class MainWindow(QMainWindow):
         loc = to_locator(lat, lon)
         self.b_loc.setText(loc + ("  GPS" if "GPS" in source else ""))
         self.b_loc.setToolTip(f"{loc} — {lat:.4f}°, {lon:.4f}° ({source}). Clic : régler")
+        if getattr(self, "mapdock", None):
+            self.mapdock.update_layers()
 
     def load_position(self):
         self.station, self.station_src = None, ""
@@ -1879,6 +1907,8 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
+    from . import cty
+    cty.refresh_in_background()
     app.setApplicationName("CAT Pilot")
     lang = QSettings("F4JCF", "CATPilot").value("lang", "fr")
     from PySide6.QtCore import QLibraryInfo, QTranslator

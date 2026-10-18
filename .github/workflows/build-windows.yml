@@ -14,7 +14,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt pyinstaller
-      - run: pyinstaller --noconfirm --onefile --windowed --name CATPilot --icon assets/catpilot.ico --add-data "assets/catpilot.ico;assets" --collect-all pyrtlsdrlib run.py
+      - run: pyinstaller --noconfirm --onefile --windowed --name CATPilot --icon assets/catpilot.ico --add-data "assets;assets" --collect-all pyrtlsdrlib run.py
       - name: Version
         id: ver
         shell: bash

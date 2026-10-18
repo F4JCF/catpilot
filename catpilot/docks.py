@@ -130,6 +130,41 @@ class CwDock(QDockWidget):
         self.lb.setWordWrap(True)
         v.addWidget(self.lb)
 
+        # --- CQ automatique ---
+        h = QHBoxLayout()
+        self.b_cq = QPushButton("CQ auto")
+        self.b_cq.setCheckable(True)
+        self.b_cq.setToolTip("Répète le message choisi, en écoutant entre deux appels.\n"
+                             "S'arrête tout seul quand le décodeur entend un indicatif qui vous répond\n"
+                             "(il passe alors dans Correspondant et dans le carnet).")
+        self.b_cq.toggled.connect(self.toggle_cq)
+        h.addWidget(self.b_cq)
+        self.cb_cq = QComboBox()
+        self.cb_cq.addItems([f"F{i + 1}" for i in range(5)])
+        self.cb_cq.setToolTip("Message répété")
+        h.addWidget(self.cb_cq)
+        h.addWidget(QLabel("écoute"))
+        from PySide6.QtWidgets import QSpinBox
+        self.sp_cq = QSpinBox()
+        self.sp_cq.setRange(2, 60)
+        self.sp_cq.setSuffix(" s")
+        self.sp_cq.setValue(int(s.value("cq_listen", 8)))
+        self.sp_cq.setToolTip("Durée d'écoute entre deux appels")
+        h.addWidget(self.sp_cq)
+        h.addWidget(QLabel("au plus"))
+        self.sp_cqmax = QSpinBox()
+        self.sp_cqmax.setRange(1, 100)
+        self.sp_cqmax.setSuffix(" appels")
+        self.sp_cqmax.setValue(int(s.value("cq_max", 20)))
+        h.addWidget(self.sp_cqmax)
+        h.addStretch()
+        v.addLayout(h)
+        self.cq_timer = QTimer(self)
+        self.cq_timer.setSingleShot(True)
+        self.cq_timer.timeout.connect(self._cq_next)
+        self._cq_n = 0
+        self._heard = ""
+
         # --- réception : décodeur CW ---
         t = QLabel("Réception : décodeur CW (audio USB du poste, comme la chute d'eau)")
         t.setObjectName("hint")
@@ -204,6 +239,64 @@ class CwDock(QDockWidget):
         return bool((st and st.ptt) or (self.keyer and self.keyer.busy) or self.queue
                     or self.timer.isActive())
 
+    # --- CQ automatique ------------------------------------------------------------------
+    def toggle_cq(self, on):
+        if on:
+            if not self._ready():
+                self.b_cq.blockSignals(True)
+                self.b_cq.setChecked(False)
+                self.b_cq.blockSignals(False)
+                return
+            if not self.b_dec.isChecked():
+                self.b_dec.setChecked(True)          # pour entendre qui répond
+            self._cq_n = 0
+            self._cq_next()
+        else:
+            self.cq_timer.stop()
+            if self._cq_n:
+                self.lb.setText(f"CQ auto arrêté après {self._cq_n} appel{'s' if self._cq_n > 1 else ''}")
+
+    def _cq_next(self):
+        if not self.b_cq.isChecked():
+            return
+        if self._cq_n >= self.sp_cqmax.value():
+            self.b_cq.setChecked(False)
+            return
+        text = normalize(self._expand(self.macros[self.cb_cq.currentIndex()].text()))
+        if not text.strip():
+            self.b_cq.setChecked(False)
+            return
+        self._cq_n += 1
+        self.send(text)
+        self._heard = ""
+        busy = duration(text, self.wpm()) + 0.6
+        self.lb.setText(f"CQ auto : appel {self._cq_n}/{self.sp_cqmax.value()}, "
+                        f"puis {self.sp_cq.value()} s d'écoute")
+        self.cq_timer.start(int((busy + self.sp_cq.value()) * 1000))
+
+    def _check_reply(self, txt):
+        """Pendant l'écoute du CQ auto : un indicatif qui répond arrête les appels."""
+        import re
+        if not self.b_cq.isChecked() or self._transmitting():
+            return
+        self._heard += txt
+        mine = self.ed_mycall.text().strip().upper()
+        words = re.findall(r"[A-Z0-9/]+", self._heard.upper())
+        rx = re.compile(r"^([A-Z0-9]{1,4}/)?[A-Z0-9]{1,3}\d[A-Z]{1,4}(/[A-Z0-9]{1,4})?$")
+        for i, w in enumerate(words):
+            if not rx.match(w) or w == mine or w.split("/")[0] == mine:
+                continue
+            twice = self._heard.upper().count(w) >= 2      # aussi dans « BOK1ABC » mal découpé
+            after_de = i > 0 and (words[i - 1] == "DE" or words[i - 1].endswith(mine))
+            after_de = after_de or (i + 1 < len(words) and words[i + 1] in ("K", "KN", "AR", "<KN>"))
+            if twice or after_de:
+                self.b_cq.setChecked(False)
+                self.use_word(w)
+                self.lb.setText(f"{w} vous répond ! CQ auto arrêté. F2 pour lui passer le report.")
+                from PySide6.QtWidgets import QApplication
+                QApplication.beep()
+                return
+
     def _feed(self, x, sr):
         self.decoder.pitch = float(self.win.wf.marker or 700)
         if self._transmitting():           # pendant l'émission, l'audio reçu n'a pas de sens
@@ -219,6 +312,7 @@ class CwDock(QDockWidget):
             self.rx.moveCursor(QTextCursor.End)
             self.rx.insertPlainText(txt)
             self.rx.moveCursor(QTextCursor.End)
+            self._check_reply(txt)
 
     def _dec_status(self):
         d = self.decoder
@@ -246,6 +340,8 @@ class CwDock(QDockWidget):
 
     def save_settings(self, s):
         s.setValue("cwdec_auto", self.ck_auto.isChecked())
+        s.setValue("cq_listen", self.sp_cq.value())
+        s.setValue("cq_max", self.sp_cqmax.value())
         s.setValue("cw_method", self.cb_method.currentIndex())
         s.setValue("cw_port", self.cb_kport.currentData() or "")
         s.setValue("mycall", self.ed_mycall.text())
@@ -325,6 +421,8 @@ class CwDock(QDockWidget):
             self.lb.setText(f"Mémoire {n} du keyer en cours d'émission")
 
     def stop(self):
+        if self.b_cq.isChecked():
+            self.b_cq.setChecked(False)
         self.queue = []
         self.timer.stop()
         if self.keyer:

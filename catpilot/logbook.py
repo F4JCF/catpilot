@@ -358,13 +358,28 @@ PREFIXES = {
 _PREFIXES_SORTED = sorted(PREFIXES, key=len, reverse=True)
 
 
+def french_name(info):
+    """Nom français d'une entité cty.dat quand on le connaît."""
+    return PREFIXES.get(info["prefix"], (info["name"],))[0]
+
+
 def prefix_info(call):
-    """Pays et zones d'après le préfixe (gère F/EA8XYZ, EA8/F4ABC, F4ABC/P)."""
+    """Pays, zones et position d'après le préfixe (fichier cty.dat ; gère EA8/F4ABC, F4ABC/P)."""
+    from . import cty
+    info = cty.lookup(call)
+    if info:
+        return {"country": french_name(info), "cq": str(int(info["cq"])), "itu": str(int(info["itu"])),
+                "cont": info["cont"], "lat": info["lat"], "lon": info["lon"], "dxcc": info["prefix"]}
+    return _prefix_info_table(call)
+
+
+def _prefix_info_table(call):
+    """Ancienne méthode (table intégrée), si cty.dat est absent."""
     parts = [p for p in call.upper().split("/") if p]
     if not parts:
         return None
     base = max(parts, key=len)
-    for p in parts:      # un préfixe ajouté (EA8/F4ABC) l'emporte s'il est court et non P/M/QRP
+    for p in parts:
         if p is not base and len(p) <= 4 and p not in ("P", "M", "MM", "AM", "QRP", "A") and not p.isdigit():
             base = p
             break

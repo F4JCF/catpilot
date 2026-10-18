@@ -8,14 +8,20 @@ import time
 import urllib.request
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QFont
+from PySide6.QtWidgets import QApplication
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDockWidget, QHBoxLayout, QHeaderView, QLabel,
     QLineEdit, QPushButton, QSpinBox, QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from . import __version__
+from . import cty
 from .geo import distance_bearing, from_locator
+
+RBN_HOST = "telnet.reversebeacon.net"
+RBN_PORTS = (7000, 7001)          # 7000 : CW et RTTY, 7001 : FT8 / FT4
+RBN_INFO = re.compile(r"(-?\d+)\s*dB(?:\s+(\d+)\s*(WPM|BPS))?", re.I)
 
 POTA_URL = "https://api.pota.app/spot/activator"
 SOTA_URL = "https://api2.sota.org.uk/api/spots/60/all"
@@ -182,8 +188,8 @@ class DxCluster(QObject):
                 self.send(call)
                 logged = True
                 buf = b""
-                continue
                 self.status.emit(f"Connecté à {host} en tant que {call}")
+                continue
             *lines, rest = text.replace("\r", "").split("\n")
             buf = rest.encode("latin-1")
             for ln in lines:
@@ -196,15 +202,44 @@ class DxCluster(QObject):
         self._run = False
 
 
+def parse_rbn(sp):
+    """Complète un spot du RBN : rapport (dB), vitesse, type (CQ, BEACON…)."""
+    c = sp.get("comment", "")
+    m = RBN_INFO.search(c)
+    sp["snr"] = int(m.group(1)) if m else None
+    sp["wpm"] = int(m.group(2)) if m and m.group(2) else None
+    words = c.upper().split()
+    sp["mode"] = words[0] if words else sp.get("mode", "")
+    sp["type"] = next((w for w in words if w in ("CQ", "BEACON", "NCDXF", "DX")), "")
+    return sp
+
+
+def wildcard_match(call, patterns):
+    for p in patterns:
+        rx = "^" + re.escape(p).replace("\\*", ".*") + "$"
+        if re.match(rx, call):
+            return True
+    return False
+
+
 class SpotsDock(QDockWidget):
     COLS = ["UTC", "Indicatif", "Fréquence", "Mode", "Référence", "Infos", "Distance"]
+    ME_COLS = ["UTC", "Entendu par", "Pays", "Distance", "Fréquence", "Mode", "dB", "Vitesse"]
 
     def __init__(self, win):
         super().__init__("Spots", win)
         self.win, self.ctrl = win, win.ctrl
         self.setObjectName("spotsdock")
         s = win.settings
-        self.data = {"pota": [], "sota": [], "dx": []}
+        self.data = {"pota": [], "sota": [], "dx": [], "me": []}
+        self.alerts = 0
+        self.rbn = []
+        for _port in RBN_PORTS:
+            c = DxCluster()
+            c.spot.connect(self.on_rbn_spot)
+            c.status.connect(self.on_rbn_status)
+            self.rbn.append(c)
+        self.grids = {}                     # indicatif -> locator (stations RBN)
         self.fetcher = Fetcher()
         self.fetcher.done.connect(self.on_fetched)
         self.cluster = DxCluster()
@@ -238,7 +273,7 @@ class SpotsDock(QDockWidget):
 
         self.tabs = QTabWidget()
         self.tables = {}
-        for key, title in (("pota", "POTA"), ("sota", "SOTA"), ("dx", "DX cluster")):
+        for key, title in (("pota", "POTA"), ("sota", "SOTA"), ("dx", "DX cluster"), ("me", "Qui m'entend ?")):
             page = QWidget()
             pv = QVBoxLayout(page)
             pv.setContentsMargins(0, 4, 0, 0)
@@ -253,19 +288,57 @@ class SpotsDock(QDockWidget):
                 dh.addWidget(self.ed_host, 1)
                 dh.addWidget(self.b_dx)
                 pv.addLayout(dh)
-            t = QTableWidget(0, len(self.COLS))
-            t.setHorizontalHeaderLabels(self.COLS)
+                ah = QHBoxLayout()
+                ah.addWidget(QLabel("Alertes :"))
+                self.ck_new = QCheckBox("nouveau pays")
+                self.ck_new.setToolTip("Signale un pays DXCC jamais contacté")
+                self.ck_new.setChecked(s.value("alert_new", "true") in (True, "true"))
+                self.ck_newband = QCheckBox("nouveau sur la bande")
+                self.ck_newband.setToolTip("Signale un pays jamais contacté sur cette bande")
+                self.ck_newband.setChecked(s.value("alert_newband", "false") in (True, "true"))
+                self.ed_watch = QLineEdit(s.value("alert_watch", ""))
+                self.ed_watch.setPlaceholderText("indicatifs surveillés : TX5S, 3Y0*, VP8*…")
+                self.ed_watch.setToolTip("Séparés par des virgules ; * remplace n'importe quels caractères")
+                self.ck_beep = QCheckBox("son")
+                self.ck_beep.setChecked(s.value("alert_beep", "true") in (True, "true"))
+                for wd in (self.ck_new, self.ck_newband):
+                    ah.addWidget(wd)
+                ah.addWidget(self.ed_watch, 1)
+                ah.addWidget(self.ck_beep)
+                pv.addLayout(ah)
+            if key == "me":
+                mh = QHBoxLayout()
+                self.b_rbn = QPushButton("Écouter le RBN")
+                self.b_rbn.setCheckable(True)
+                self.b_rbn.setToolTip("Reverse Beacon Network : des récepteurs automatiques du monde entier "
+                                      "signalent qui ils entendent (CW, RTTY, FT8, FT4).\n"
+                                      "Lancez un CQ avec votre indicatif : les stations qui vous "
+                                      "entendent s'affichent ici et sur la carte.")
+                self.b_rbn.toggled.connect(self.toggle_rbn)
+                mh.addWidget(self.b_rbn)
+                self.lb_me = QLabel("")
+                self.lb_me.setObjectName("value")
+                mh.addWidget(self.lb_me, 1)
+                b = QPushButton("Effacer")
+                b.clicked.connect(self.clear_me)
+                mh.addWidget(b)
+                pv.addLayout(mh)
+            cols = self.ME_COLS if key == "me" else self.COLS
+            t = QTableWidget(0, len(cols))
+            t.setHorizontalHeaderLabels(cols)
             t.verticalHeader().setVisible(False)
             t.setEditTriggers(QAbstractItemView.NoEditTriggers)
             t.setSelectionBehavior(QAbstractItemView.SelectRows)
             t.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
             t.horizontalHeader().setStretchLastSection(True)
-            t.cellDoubleClicked.connect(lambda r, _c, k=key: self.tune(k, r))
-            t.setToolTip("Double-clic : accorder le poste et préparer le QSO dans le carnet")
+            if key != "me":
+                t.cellDoubleClicked.connect(lambda r, _c, k=key: self.tune(k, r))
+                t.setToolTip("Double-clic : accorder le poste et préparer le QSO dans le carnet")
             pv.addWidget(t)
             self.tables[key] = t
             self.tabs.addTab(page, title)
         v.addWidget(self.tabs, 1)
+        self.tabs.currentChanged.connect(self._tab_changed)
         h = QHBoxLayout()
         h.addWidget(QLabel("Actualisation"))
         self.sp_every = QSpinBox()
@@ -286,6 +359,11 @@ class SpotsDock(QDockWidget):
         self._arm_timer()
         self.visibilityChanged.connect(lambda vis: vis and not self.data["pota"] and self.refresh_now())
 
+    def _tab_changed(self, i):
+        if i == 2 and self.alerts:
+            self.alerts = 0
+            self.tabs.setTabText(2, "DX cluster")
+
     def _arm_timer(self):
         n = self.sp_every.value()
         if n:
@@ -304,16 +382,186 @@ class SpotsDock(QDockWidget):
         if isinstance(data, Exception):
             self.lb_status.setText(f"{kind.upper()} indisponible : {data}")
             return
+        for sp in data:
+            self._fill_pos(sp)
+            why = self.alert_reason(sp) if self.ed_watch.text().strip() else ""
+            if why == "indicatif surveillé":
+                sp["alert"] = why
         self.data[kind] = data
+        mp = getattr(self.win, "mapdock", None)
+        if mp:
+            mp.update_layers()
         self.lb_status.setText(f"Mis à jour à {datetime.datetime.now(datetime.timezone.utc):%H:%M} UTC")
         self.refresh_tables()
 
     def on_dx_spot(self, sp):
+        self._fill_pos(sp)
+        why = self.alert_reason(sp)
+        if why:
+            sp["alert"] = why
+            self.alerts += 1
+            self.tabs.setTabText(2, f"DX cluster ({self.alerts} alerte{'s' if self.alerts > 1 else ''})")
+            self.win.statusBar().showMessage(
+                f"Alerte : {sp['call']} sur {sp['hz'] / 1e3:.1f} kHz {sp['mode']} — {why}", 20000)
+            if self.ck_beep.isChecked():
+                QApplication.beep()
         lst = self.data["dx"]
         lst[:] = [x for x in lst if not (x["call"] == sp["call"] and abs(x["hz"] - sp["hz"]) < 2000)]
         lst.insert(0, sp)
         del lst[300:]
         self.refresh_tables("dx")
+        mp = getattr(self.win, "mapdock", None)
+        if mp:
+            mp.update_layers()
+
+    # --- alertes ----------------------------------------------------------------------------
+    def alert_reason(self, sp):
+        call = sp["call"]
+        watch = [w.strip().upper() for w in self.ed_watch.text().split(",") if w.strip()]
+        if watch and wildcard_match(call, watch):
+            return "indicatif surveillé"
+        if not (self.ck_new.isChecked() or self.ck_newband.isChecked()):
+            return ""
+        ent = cty.dxcc(call)
+        if not ent:
+            return ""
+        worked = self.win.worked_entities()
+        from .logbook import band_of_mhz, french_name
+        name = french_name(ent)
+        if self.ck_new.isChecked() and ent["prefix"] not in worked:
+            return f"nouveau pays : {name}"
+        band = band_of_mhz(sp["hz"] / 1e6)
+        if self.ck_newband.isChecked() and band and band not in worked.get(ent["prefix"], set()):
+            return f"{name} jamais contacté sur {band}"
+        return ""
+
+    def _fill_pos(self, sp):
+        if sp.get("grid"):
+            try:
+                sp["lat"], sp["lon"] = from_locator(sp["grid"])
+                return
+            except ValueError:
+                pass
+        info = cty.lookup(sp["call"])
+        if info:
+            sp["lat"], sp["lon"] = info["lat"], info["lon"]
+
+    # --- Reverse Beacon Network ---------------------------------------------------------
+    def toggle_rbn(self, on):
+        call = (self.win.settings.value("mycall", "") or "").strip().upper()
+        if on and not call:
+            self.lb_me.setText("Indiquez votre indicatif (menu Carnet > Réglages)")
+            self.b_rbn.blockSignals(True)
+            self.b_rbn.setChecked(False)
+            self.b_rbn.blockSignals(False)
+            return
+        for c, port in zip(self.rbn, RBN_PORTS):
+            if on:
+                c.connect_to(RBN_HOST, port, call)
+            else:
+                c.disconnect()
+        self.b_rbn.setText("Arrêter le RBN" if on else "Écouter le RBN")
+        if not on:
+            self.lb_me.setText("")
+
+    def on_rbn_status(self, msg):
+        if self.b_rbn.isChecked() and not self.data["me"]:
+            self.lb_me.setText(msg.replace(RBN_HOST, "RBN"))
+
+    def on_rbn_spot(self, sp):
+        mine = cty.base_call(self.win.settings.value("mycall", "") or "")
+        if not mine or cty.base_call(sp["call"]) != mine:
+            return
+        parse_rbn(sp)
+        sp["spotter"] = re.sub(r"-[0-9#]+$", "", sp["spotter"].upper())
+        sp["t"] = time.time()
+        g = self.grids.get(sp["spotter"])
+        if g:
+            sp["grid"] = g
+        else:
+            self._ask_grid(sp["spotter"])
+        info = cty.lookup(sp["spotter"])
+        sp["country"] = ""
+        if info:
+            from .logbook import french_name
+            sp["country"] = french_name(info)
+        self._fill_spotter_pos(sp)
+        lst = self.data["me"]
+        lst[:] = [x for x in lst if x["spotter"] != sp["spotter"] and time.time() - x["t"] < 3600]
+        lst.insert(0, sp)
+        self.refresh_me()
+
+    def _fill_spotter_pos(self, sp):
+        grid = sp.get("grid") or self.grids.get(sp["spotter"])
+        pos = None
+        if grid:
+            try:
+                pos = from_locator(grid)
+            except ValueError:
+                pos = None
+        if not pos:
+            info = cty.lookup(sp["spotter"])
+            pos = (info["lat"], info["lon"]) if info else None
+        if pos:
+            sp["lat"], sp["lon"] = pos
+            st = getattr(self.win, "station", None)
+            if st:
+                sp["km"], sp["az"] = distance_bearing(*st, *pos)
+
+    def _ask_grid(self, call):
+        """Locator précis d'une station du RBN (QRZ.com / HamQTH, si un compte est réglé)."""
+        if call in self.grids or not hasattr(self.win, "logdock"):
+            return
+        self.grids[call] = ""
+        look = self.win.logdock.hamqth
+        if not getattr(self, "_grid_hooked", False):
+            look.result.connect(self._on_grid)
+            self._grid_hooked = True
+        look.lookup(call)
+
+    def _on_grid(self, call, info):
+        if call in self.grids and isinstance(info, dict) and info.get("grid"):
+            self.grids[call] = info["grid"][:6]
+            for sp in self.data["me"]:
+                if sp["spotter"] == call:
+                    sp["grid"] = self.grids[call]
+                    self._fill_spotter_pos(sp)
+            self.refresh_me()
+
+    def clear_me(self):
+        self.data["me"] = []
+        self.refresh_me()
+
+    def refresh_me(self):
+        rows = self.data["me"]
+        t = self.tables["me"]
+        t.setRowCount(len(rows))
+        for i, sp in enumerate(rows):
+            vals = [sp["time"], sp["spotter"], sp.get("country", ""),
+                    f"{sp['km']:.0f} km" if sp.get("km") is not None else "",
+                    f"{sp['hz'] / 1e3:.1f}".replace(".", ","), sp.get("mode", ""),
+                    f"{sp['snr']} dB" if sp.get("snr") is not None else "",
+                    f"{sp['wpm']} mots/min" if sp.get("wpm") and sp.get("mode") == "CW" else ""]
+            for c, val in enumerate(vals):
+                it = QTableWidgetItem(val)
+                if c in (3, 4, 6):
+                    it.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                t.setItem(i, c, it)
+        if rows:
+            far = max(rows, key=lambda x: x.get("km") or 0)
+            best = max(rows, key=lambda x: x.get("snr") if x.get("snr") is not None else -99)
+            txt = f"{len(rows)} station{'s' if len(rows) > 1 else ''} vous entend{'ent' if len(rows) > 1 else ''}"
+            if far.get("km"):
+                txt += f" · la plus loin : {far['spotter']} ({far['km']:.0f} km)"
+            if best.get("snr") is not None:
+                txt += f" · meilleur : {best['snr']} dB ({best['spotter']})"
+            self.lb_me.setText(txt)
+            self.tabs.setTabText(3, f"Qui m'entend ? ({len(rows)})")
+        else:
+            self.tabs.setTabText(3, "Qui m'entend ?")
+        mp = getattr(self.win, "mapdock", None)
+        if mp:
+            mp.update_layers()
 
     def toggle_cluster(self, on):
         if on:
@@ -357,7 +605,7 @@ class SpotsDock(QDockWidget):
     def refresh_tables(self, only=None):
         pos = getattr(self.win, "station", None)
         for key, t in self.tables.items():
-            if only and isinstance(only, str) and key != only:
+            if key == "me" or (only and isinstance(only, str) and key != only):
                 continue
             rows = [sp for sp in self.data[key] if self._visible(sp)]
             t.setProperty("rows", rows)
@@ -377,7 +625,13 @@ class SpotsDock(QDockWidget):
                     it = QTableWidgetItem(val)
                     if c == 2:
                         it.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                    if self.win.worked_before(sp["call"]):
+                    if sp.get("alert"):
+                        it.setForeground(QColor("#ff9a2e"))
+                        f = QFont(it.font())
+                        f.setBold(True)
+                        it.setFont(f)
+                        it.setToolTip("Alerte : " + sp["alert"])
+                    elif self.win.worked_before(sp["call"]):
                         it.setForeground(QColor("#7a7a7a"))
                     t.setItem(i, c, it)
 
@@ -397,6 +651,12 @@ class SpotsDock(QDockWidget):
         self.win.statusBar().showMessage(f"Accordé sur {sp['call']} {sp['hz'] / 1e3:.1f} kHz {sp['mode']}")
 
     def save_settings(self, s):
+        s.setValue("alert_new", self.ck_new.isChecked())
+        s.setValue("alert_newband", self.ck_newband.isChecked())
+        s.setValue("alert_watch", self.ed_watch.text())
+        s.setValue("alert_beep", self.ck_beep.isChecked())
+        for c in self.rbn:
+            c.disconnect()
         s.setValue("dx_host", self.ed_host.text())
         s.setValue("spots_every", self.sp_every.value())
         self.cluster.disconnect()
