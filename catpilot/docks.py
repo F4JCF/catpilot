@@ -99,7 +99,7 @@ class CwDock(QDockWidget):
         h.addWidget(b)
         v.addLayout(h)
 
-        t = QLabel("Messages programmables  ({MYCALL}, {CALL}, <BT>, <SK>, <AR>, <KN>)")
+        t = QLabel("Messages programmables  ({MYCALL}, {CALL}, {NR}, <BT>, <SK>, <AR>, <KN>)")
         t.setObjectName("hint")
         v.addWidget(t)
         self.macros = []
@@ -357,8 +357,10 @@ class CwDock(QDockWidget):
             self.keyer = None
 
     def _expand(self, text):
+        log = getattr(self.win, "logdock", None)
+        nr = f"{log.sp_serial.value():03d}" if log else "001"
         return (text.replace("{MYCALL}", self.ed_mycall.text().strip().upper())
-                    .replace("{CALL}", self.ed_call.text().strip().upper()))
+                    .replace("{CALL}", self.ed_call.text().strip().upper()).replace("{NR}", nr))
 
     def _ready(self):
         if not self.ctrl.connected:

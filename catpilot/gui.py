@@ -1204,6 +1204,8 @@ class MainWindow(QMainWindow):
                             ("Exporter tout le carnet en ADIF…", lambda: self.logdock.export_adif()),
                             ("Exporter l'activation du jour (POTA/SOTA)…", lambda: self.logdock.export_activation()),
                             (None, None),
+                            ("Exporter un concours en Cabrillo…", lambda: self.logdock.export_cabrillo()),
+                            ("Sauvegarde Nextcloud…", self.backup_dialog),
                             ("Envoi en ligne : QRZ.com, eQSL, Club Log, LoTW…", self.upload_dialog),
                             ("Diplômes et statistiques…", self.awards_dialog),
                             (None, None),
@@ -1534,8 +1536,14 @@ class MainWindow(QMainWindow):
         self.announcer = FreqAnnouncer(self, self.speaker)
         self.announcer.enabled = s.value("speak_freq", "false") in (True, "true")
         self.speak_alerts = s.value("speak_alerts", "false") in (True, "true")
+        from .backup import Backup
+        self.backup = Backup(self)
+        self.backup.status.connect(lambda m: self.statusBar().showMessage(m, 10000))
         from .scheduler import Scheduler
         self.scheduler = Scheduler(self)
+        a2 = QAction("Analyseur de SWR (balayage d'une bande)…", self)
+        a2.triggered.connect(self.swr_dialog)
+        self.menu_poste.addAction(a2)
         a = QAction("Programmateur (réglage à heure fixe)…", self)
         a.triggered.connect(self.scheduler_dialog)
         self.menu_poste.addSeparator()
@@ -1589,7 +1597,21 @@ class MainWindow(QMainWindow):
         self.set_wf_size(self.wf_size)
         self.set_freq_size(self.freq_size)
 
+    def swr_dialog(self):
+        if not self.ctrl.connected:
+            QMessageBox.information(self, "Analyseur de SWR", "Connectez d'abord le poste.")
+            return
+        from .swrscan import SwrDialog
+        SwrDialog(self).exec()
+
+    def backup_dialog(self):
+        from .backup import BackupDialog
+        BackupDialog(self).exec()
+
     def scheduler_dialog(self):
+        from .backup import Backup
+        self.backup = Backup(self)
+        self.backup.status.connect(lambda m: self.statusBar().showMessage(m, 10000))
         from .scheduler import SchedulerDialog
         SchedulerDialog(self).exec()
 

@@ -19,7 +19,8 @@ from . import __version__, adif
 
 FIELDS = ["call", "qso_date", "time_on", "freq", "band", "mode", "submode", "rst_sent", "rst_rcvd",
           "name", "qth", "gridsquare", "sig", "sig_info", "my_sig", "my_sig_info", "comment",
-          "tx_pwr", "my_gridsquare", "station_callsign", "operator", "country"]
+          "tx_pwr", "my_gridsquare", "station_callsign", "operator", "country",
+          "contest_id", "stx", "srx", "stx_string", "srx_string"]
 
 BAND_EDGES = [("2200m", 0.1357, 0.1378), ("630m", 0.472, 0.479), ("160m", 1.8, 2.0), ("80m", 3.5, 4.0),
               ("60m", 5.06, 5.45), ("40m", 7.0, 7.3), ("30m", 10.1, 10.15), ("20m", 14.0, 14.35),
@@ -480,6 +481,39 @@ class LogDock(QDockWidget):
             g.addWidget(QLabel(label), i // 2, (i % 2) * 2)
             g.addWidget(wd, i // 2, (i % 2) * 2 + 1)
         v.addLayout(g)
+        # --- concours ---
+        from PySide6.QtWidgets import QCheckBox, QSpinBox
+        ch = QHBoxLayout()
+        self.ck_contest = QCheckBox("Concours")
+        self.ck_contest.setToolTip("Numéros de série, contrôle des doublons du concours, export Cabrillo")
+        self.ck_contest.setChecked(s.value("contest_on", "false") in (True, "true"))
+        self.ck_contest.toggled.connect(self._contest_toggled)
+        ch.addWidget(self.ck_contest)
+        self.ed_contest = QLineEdit(s.value("contest_id", ""))
+        self.ed_contest.setPlaceholderText("nom (ex. CQ-WW-CW, REF-CW)")
+        self.ed_contest.setMaximumWidth(150)
+        ch.addWidget(self.ed_contest)
+        ch.addWidget(QLabel("N° envoyé"))
+        self.sp_serial = QSpinBox()
+        self.sp_serial.setRange(1, 99999)
+        self.sp_serial.setValue(int(s.value("contest_serial", 1)))
+        self.sp_serial.setToolTip("Numéro de série du prochain QSO ({NR} dans les messages CW)")
+        ch.addWidget(self.sp_serial)
+        self.ed_xsent = QLineEdit(s.value("contest_xsent", "{NR}"))
+        self.ed_xsent.setToolTip("Échange envoyé : {NR} = numéro de série, ou texte fixe (département, zone…)")
+        self.ed_xsent.setMaximumWidth(90)
+        ch.addWidget(QLabel("Échange"))
+        ch.addWidget(self.ed_xsent)
+        ch.addWidget(QLabel("Reçu"))
+        self.ed_xrcvd = QLineEdit()
+        self.ed_xrcvd.setPlaceholderText("n° ou échange reçu")
+        self.ed_xrcvd.setMaximumWidth(110)
+        self.ed_xrcvd.returnPressed.connect(self.save_qso)
+        ch.addWidget(self.ed_xrcvd)
+        ch.addStretch()
+        self.contest_row = [self.ed_contest, self.sp_serial, self.ed_xsent, self.ed_xrcvd]
+        v.addLayout(ch)
+        self._contest_toggled(self.ck_contest.isChecked())
         self.lb_info = QLabel("")
         self.lb_info.setObjectName("value")
         self.lb_info.setWordWrap(True)
@@ -568,12 +602,41 @@ class LogDock(QDockWidget):
                 ed.clear()
         self._auto.clear()
         prev = self.log.worked(txt.strip()) if len(txt.strip()) >= 3 else []
+        dupe = self.contest_dupe(txt.strip())
+        if dupe:
+            self.lb_info.setText(f"DOUBLON : déjà contacté dans ce concours ({dupe})")
+            self.lb_info.setStyleSheet("color: #ff5a4a; font-weight: bold;")
+            self._lookup_timer.start()
+            return
+        self.lb_info.setStyleSheet("")
         if prev:
             bands = sorted({f"{r['band']} {r['mode']}" for r in prev})
             self.lb_info.setText(f"Déjà contacté {len(prev)} fois : " + ", ".join(bands[:8]))
         else:
             self.lb_info.setText("Nouvel indicatif" if len(txt.strip()) >= 3 else "")
         self._lookup_timer.start()
+
+    # --- concours ----------------------------------------------------------------------------
+    def _contest_toggled(self, on):
+        for w in self.contest_row:
+            w.setEnabled(on)
+
+    def contest_on(self):
+        return self.ck_contest.isChecked() and bool(self.ed_contest.text().strip())
+
+    def sent_exchange(self):
+        return self.ed_xsent.text().replace("{NR}", f"{self.sp_serial.value():03d}").strip()
+
+    def contest_dupe(self, call):
+        """Même indicatif, même bande et même mode dans ce concours."""
+        if not self.contest_on() or len(call) < 3:
+            return ""
+        band = band_of_mhz(self._last.freq / 1e6) if self._last and self._last.freq else ""
+        mode = adif.ADIF_MODES.get(self.cb_mode.currentText(), (self.cb_mode.currentText(), ""))[0]
+        for r in self.log.query("call = ? AND contest_id = ?", (call.upper(), self.ed_contest.text().strip().upper())):
+            if r["band"] == band and r["mode"] == mode:
+                return f"{r['band']} {r['submode'] or r['mode']} à {(r['time_on'] or '')[:4]}"
+        return ""
 
     def auto_lookup(self):
         call = self.ed_call.text().strip().upper()
@@ -674,6 +737,13 @@ class LogDock(QDockWidget):
             rec["sig"], rec["sig_info"] = kind(ref), ref
         if myref:
             rec["my_sig"], rec["my_sig_info"] = kind(myref), myref
+        if self.contest_on():
+            rcvd = self.ed_xrcvd.text().strip().upper()
+            rec.update({"contest_id": self.ed_contest.text().strip().upper(), "stx": str(self.sp_serial.value()),
+                        "stx_string": self.sent_exchange(), "srx_string": rcvd,
+                        "srx": rcvd if rcvd.isdigit() else ""})
+            self.sp_serial.setValue(self.sp_serial.value() + 1)
+            self.ed_xrcvd.clear()
         self.log.add(rec)
         self.win.statusBar().showMessage(f"QSO avec {call} enregistré")
         self.clear_form()
@@ -756,6 +826,51 @@ class LogDock(QDockWidget):
 
     def save_settings(self, s):
         s.setValue("log_myref", self.ed_myref.text())
+        s.setValue("contest_on", self.ck_contest.isChecked())
+        s.setValue("contest_id", self.ed_contest.text())
+        s.setValue("contest_serial", self.sp_serial.value())
+        s.setValue("contest_xsent", self.ed_xsent.text())
+
+    def export_cabrillo(self):
+        """Fichier Cabrillo (format des concours) pour le concours choisi."""
+        from PySide6.QtWidgets import QInputDialog
+        with self.log.lock:
+            ids = [r[0] for r in self.log.db.execute(
+                "SELECT DISTINCT contest_id FROM qso WHERE contest_id IS NOT NULL AND contest_id != ''")]
+        if not ids:
+            QMessageBox.information(self, "Cabrillo", "Aucun QSO de concours dans le carnet (cochez « Concours »).")
+            return
+        cid, ok = QInputDialog.getItem(self, "Cabrillo", "Concours :", ids, 0, False)
+        if not ok:
+            return
+        rows = sorted(self.log.query("contest_id = ?", (cid,)),
+                      key=lambda r: (r["qso_date"] or "", r["time_on"] or "", r["id"]))
+        me = (self.win.settings.value("mycall", "") or "").upper()
+        path, _ = QFileDialog.getSaveFileName(self, "Exporter en Cabrillo", os.path.join(data_dir(), f"{cid}_{me}.log"),
+                                              "Cabrillo (*.log *.cbr)")
+        if not path:
+            return
+        cab_mode = {"CW": "CW", "SSB": "PH", "FM": "FM", "AM": "PH", "RTTY": "RY"}
+        out = ["START-OF-LOG: 3.0", f"CONTEST: {cid}", f"CALLSIGN: {me}", "CATEGORY-OPERATOR: SINGLE-OP",
+               "CATEGORY-TRANSMITTER: ONE", f"CREATED-BY: CAT Pilot {__version__}"]
+        st = getattr(self.win, "station", None)
+        if st:
+            out.append(f"GRID-LOCATOR: {self.win.b_loc.text().split()[0]}")
+        for r in rows:
+            try:
+                khz = f"{float(r['freq']) * 1000:.0f}" if r["freq"] else "0"
+            except ValueError:
+                khz = "0"
+            d = r["qso_date"] or ""
+            mo = cab_mode.get(r["mode"], "DG")
+            sent = f"{r['rst_sent'] or ''} {r['stx_string'] or r['stx'] or ''}".strip()
+            rcvd = f"{r['rst_rcvd'] or ''} {r['srx_string'] or r['srx'] or ''}".strip()
+            out.append(f"QSO: {khz:>5} {mo} {d[:4]}-{d[4:6]}-{d[6:8]} {(r['time_on'] or '')[:4]} "
+                       f"{me:<13} {sent:<10} {r['call']:<13} {rcvd}")
+        out.append("END-OF-LOG:")
+        with open(path, "w", encoding="ascii", errors="replace") as f:
+            f.write("\n".join(out) + "\n")
+        self.win.statusBar().showMessage(f"{len(rows)} QSO exportés en Cabrillo dans {path}")
 
 
 class HamQTHDialog(QDialog):

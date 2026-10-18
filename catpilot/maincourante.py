@@ -7,6 +7,7 @@ Base : Documents/CATPilot/main_courante.sqlite
 import csv
 import datetime
 import html
+import json
 import os
 import sqlite3
 import threading
@@ -26,6 +27,16 @@ HEAD = ["N°", "Date et heure", "UTC", "Sens", "De", "À", "Moyen", "Priorité",
 PRIOS = ["Routine", "Urgent", "Très urgent"]
 SENS = ["Reçu", "Émis", "Info"]
 PRIO_COLORS = {"Urgent": "#ff9800", "Très urgent": "#f44336"}
+DEFAULT_TEMPLATES = [
+    ("Arrivée sur zone", "Arrivée sur zone à {HEURE}. Position {LOC}. Station en place, écoute sur {MOYEN}."),
+    ("Contrôle radio", "Contrôle radio : reçu 5 sur 5. Comment me recevez-vous ?"),
+    ("Position", "Position de la station : locator {LOC} ({LAT}, {LON})."),
+    ("Point de situation", "Point de situation à {HEURE} : RAS / préciser…\nMoyens engagés : …\nProchain point : …"),
+    ("Bilan radio", "Bilan radio à {HEURE} : liaison avec … qualité …/5. Stations en écoute : …"),
+    ("Demande de moyens", "Demande de moyens : …\nLieu : …\nMotif : …\nDélai souhaité : …"),
+    ("Relève", "Relève de l'opérateur à {HEURE} : {OPERATEUR} remplacé par …"),
+    ("Fin de mission", "Fin de mission à {HEURE}. Matériel replié, retour à la base."),
+]
 
 
 class Journal:
@@ -159,8 +170,20 @@ class MainCouranteDock(QDockWidget):
         g.addWidget(self.ed_moyen, 2, 1)
         g.addWidget(QLabel("Priorité"), 2, 2)
         g.addWidget(self.cb_prio, 2, 3)
-        g.addWidget(QLabel("Message"), 3, 0)
+        mv = QVBoxLayout()
+        mv.addWidget(QLabel("Message"))
+        self.cb_tpl = QComboBox()
+        self.cb_tpl.setToolTip("Modèles de messages ADRASEC : choisir pour remplir le texte")
+        self.cb_tpl.activated.connect(self._use_template)
+        mv.addWidget(self.cb_tpl)
+        mv.addStretch()
+        g.addLayout(mv, 3, 0)
         g.addWidget(self.ed_msg, 3, 1, 1, 3)
+        try:
+            self.templates = json.loads(s.value("mc_templates", "null") or "null") or DEFAULT_TEMPLATES
+        except ValueError:
+            self.templates = DEFAULT_TEMPLATES
+        self._fill_templates()
         g.addWidget(QLabel("Suite"), 4, 0)
         g.addWidget(self.ed_suite, 4, 1, 1, 2)
         g.addWidget(self.ed_op, 4, 3)
@@ -205,8 +228,17 @@ class MainCouranteDock(QDockWidget):
             b.clicked.connect(slot)
             h.addWidget(b)
         v.addLayout(h)
+        h = QHBoxLayout()
+        from PySide6.QtWidgets import QCheckBox
+        self.ck_qso = QCheckBox("Noter aussi les QSO du carnet dans cette main courante")
+        self.ck_qso.setToolTip("Chaque QSO enregistré (carnet, FT8…) s'ajoute ici, horodaté, tant que l'opération est en cours")
+        self.ck_qso.setChecked(s.value("mc_qso", "false") in (True, "true"))
+        h.addWidget(self.ck_qso)
+        h.addStretch()
+        v.addLayout(h)
         self.setWidget(w)
         self.setMinimumWidth(620)
+        win.log.added.connect(self._qso_added)
         self.reload_ops(select=int(s.value("mc_op", 0) or 0))
 
     # --- opérations -----------------------------------------------------------------------
@@ -391,6 +423,120 @@ class MainCouranteDock(QDockWidget):
         doc.setPageSize(pdf.pageLayout().paintRectPixels(pdf.resolution()).size().toSizeF())
         doc.print_(pdf)
 
+    # --- modèles et QSO ----------------------------------------------------------------------
+    def _fill_templates(self):
+        self.cb_tpl.clear()
+        self.cb_tpl.addItem("Modèle…")
+        for name, _t in self.templates:
+            self.cb_tpl.addItem(name)
+        self.cb_tpl.addItem("Gérer les modèles…")
+
+    def _use_template(self, i):
+        if i == 0:
+            return
+        if i == self.cb_tpl.count() - 1:
+            self._manage_templates()
+        else:
+            name, text = self.templates[i - 1]
+            st = getattr(self.win, "station", None)
+            now = datetime.datetime.now()
+            text = (text.replace("{HEURE}", now.strftime("%H h %M"))
+                    .replace("{MOYEN}", self._rig_moyen() or "…")
+                    .replace("{LOC}", self.win.b_loc.text().split()[0] if st else "…")
+                    .replace("{LAT}", f"{st[0]:.5f}" if st else "…").replace("{LON}", f"{st[1]:.5f}" if st else "…")
+                    .replace("{MYCALL}", (self.win.settings.value("mycall", "") or "").upper())
+                    .replace("{OPERATEUR}", self.ed_op.text() or "…"))
+            self.ed_msg.setPlainText(text)
+            self.ed_msg.setFocus()
+        self.cb_tpl.setCurrentIndex(0)
+
+    def _manage_templates(self):
+        from PySide6.QtWidgets import QDialog, QDialogButtonBox, QListWidget
+        d = QDialog(self)
+        d.setWindowTitle("Modèles de messages")
+        d.resize(620, 380)
+        v = QVBoxLayout(d)
+        hl = QHBoxLayout()
+        lst = QListWidget()
+        ed_name = QLineEdit()
+        ed_txt = QPlainTextEdit()
+        items = [list(t) for t in self.templates]
+        for n, _t in items:
+            lst.addItem(n)
+        right = QVBoxLayout()
+        right.addWidget(QLabel("Nom"))
+        right.addWidget(ed_name)
+        right.addWidget(QLabel("Texte ({HEURE}, {MOYEN}, {LOC}, {LAT}, {LON}, {MYCALL}, {OPERATEUR})"))
+        right.addWidget(ed_txt, 1)
+        hl.addWidget(lst, 1)
+        hl.addLayout(right, 2)
+        v.addLayout(hl, 1)
+
+        def sel(row):
+            if 0 <= row < len(items):
+                ed_name.setText(items[row][0])
+                ed_txt.setPlainText(items[row][1])
+
+        def store():
+            row = lst.currentRow()
+            if 0 <= row < len(items):
+                items[row] = [ed_name.text().strip() or items[row][0], ed_txt.toPlainText()]
+                lst.item(row).setText(items[row][0])
+        lst.currentRowChanged.connect(sel)
+        ed_name.editingFinished.connect(store)
+        ed_txt.textChanged.connect(store)
+        bh = QHBoxLayout()
+        b = QPushButton("Nouveau")
+        b.clicked.connect(lambda: (items.append(["Nouveau modèle", ""]), lst.addItem("Nouveau modèle"),
+                                   lst.setCurrentRow(len(items) - 1)))
+        bh.addWidget(b)
+        b = QPushButton("Supprimer")
+        b.clicked.connect(lambda: (lst.currentRow() >= 0) and (items.pop(lst.currentRow()), lst.takeItem(lst.currentRow())))
+        bh.addWidget(b)
+        b = QPushButton("Modèles d'origine")
+        b.clicked.connect(lambda: (items.clear(), items.extend([list(t) for t in DEFAULT_TEMPLATES]), lst.clear(),
+                                   [lst.addItem(n) for n, _t in items]))
+        bh.addWidget(b)
+        bh.addStretch()
+        v.addLayout(bh)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(d.accept)
+        bb.rejected.connect(d.reject)
+        v.addWidget(bb)
+        lst.setCurrentRow(0)
+        if d.exec():
+            store()
+            self.templates = [tuple(t) for t in items if t[0]]
+            self.win.settings.setValue("mc_templates", json.dumps(self.templates))
+            self._fill_templates()
+
+    def _qso_added(self, qid):
+        op = self.current_op()
+        if not self.ck_qso.isChecked() or not op:
+            return
+        info = self.journal.operation(op)
+        if not info or info[5]:                       # opération close
+            return
+        rows = self.win.log.query("id = ?", (qid,))
+        if not rows:
+            return
+        r = rows[0]
+        moyen = ""
+        try:
+            moyen = f"{float(r['freq']):.4f} MHz {r.get('submode') or r.get('mode') or ''}".replace(".", ",")
+        except (TypeError, ValueError):
+            moyen = r.get("mode") or ""
+        now = datetime.datetime.now().astimezone()
+        rec = {"ts": now.strftime("%d/%m/%Y %H:%M:%S"), "utc": now.astimezone(datetime.timezone.utc).strftime("%H:%M"),
+               "sens": "Info", "de": (r.get("station_callsign") or "").upper(), "a": r["call"], "moyen": moyen,
+               "prio": "Routine",
+               "message": f"QSO avec {r['call']}" + (f" ({r['name']})" if r.get("name") else "")
+                          + f", report envoyé {r.get('rst_sent') or '-'}, reçu {r.get('rst_rcvd') or '-'}",
+               "suite": "", "operateur": self.ed_op.text().strip()}
+        self.journal.add(op, rec)
+        self.refresh()
+
     def save_settings(self, s):
+        s.setValue("mc_qso", self.ck_qso.isChecked())
         s.setValue("mc_operateur", self.ed_op.text())
         s.setValue("mc_op", self.current_op() or 0)

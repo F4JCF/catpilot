@@ -59,7 +59,13 @@ class SimDriver(RigDriver):
         st.freq, st.mode, st.ptt = self.f, self.m, self.ptt
         if self.ptt:
             st.smeter = 0.0
-            st.po, st.swr, st.swr_val = self.p["pwr"] / 100 * 0.8, 0.12, 1.3
+            # antenne simulée : accordée un peu en dessous du milieu de chaque bande
+            centre = {1: 1.84e6, 3: 3.65e6, 5: 5.36e6, 7: 7.08e6, 10: 10.12e6, 14: 14.15e6, 18: 18.11e6,
+                      21: 21.2e6, 24: 24.94e6, 28: 28.5e6, 50: 50.3e6, 144: 145.0e6, 430: 435.0e6}
+            f0 = min(centre.values(), key=lambda c: abs(c - self.f))
+            swr = 1.15 + ((self.f - f0) / (f0 * 0.012)) ** 2
+            st.po, st.swr_val = self.p["pwr"] / 100 * 0.8, min(9.9, swr)
+            st.swr = min(1.0, (st.swr_val - 1) / 3 * 0.35)
             st.alc = 0.25 + random.uniform(0, 0.1)
         else:
             st.smeter = self._s
