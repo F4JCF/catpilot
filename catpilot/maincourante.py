@@ -149,7 +149,8 @@ class Journal:
 
     def add(self, op, rec):
         with self.lock:
-            n = self.db.execute("SELECT COUNT(*) FROM message WHERE op = ?", (op,)).fetchone()[0] + 1
+            n = (self.db.execute("SELECT MAX(CAST(n AS INTEGER)) FROM message WHERE op = ?", (op,)).fetchone()[0]
+                 or 0) + 1                          # jamais deux fois le même numéro, même après une suppression
             rec = dict(rec, n=str(n))
             self.db.execute(f"INSERT INTO message (op, {', '.join(COLS)}) VALUES (?, {', '.join('?' * len(COLS))})",
                             [op] + [rec.get(c, "") for c in COLS])
@@ -164,6 +165,11 @@ class Journal:
             modif = "; ".join(x for x in ((old[0] if old else ""), note) if x)
             self.db.execute(f"UPDATE message SET {', '.join(c + ' = ?' for c in cols)}, modif = ? WHERE id = ?",
                             [rec[c] for c in cols] + [modif, mid])
+            self.db.commit()
+
+    def delete(self, mid):
+        with self.lock:
+            self.db.execute("DELETE FROM message WHERE id = ?", (mid,))
             self.db.commit()
 
     def update(self, mid, col, value):
@@ -299,11 +305,17 @@ class MainCouranteDock(QDockWidget):
         hdr = self.tbl.horizontalHeader()
         hdr.setSectionResizeMode(QHeaderView.ResizeToContents)
         hdr.setSectionResizeMode(8, QHeaderView.Stretch)
-        self.tbl.setToolTip("Double-clic sur un message pour le modifier (la date de modification est notée)")
+        self.tbl.setToolTip("Double-clic : modifier le message (la date de modification est notée) · "
+                            "clic droit ou touche Suppr : supprimer")
+        self.tbl.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tbl.customContextMenuRequested.connect(self._table_menu)
+        from PySide6.QtGui import QKeySequence, QShortcut
+        QShortcut(QKeySequence.Delete, self.tbl, activated=self.delete_selected, context=Qt.WidgetShortcut)
         self.tbl.itemChanged.connect(self._edited)
         v.addWidget(self.tbl, 1)
         h = QHBoxLayout()
-        for label, slot in (("Exporter en PDF…", self.export_pdf), ("Exporter en CSV…", self.export_csv)):
+        for label, slot in (("Supprimer le message", self.delete_selected),
+                            ("Exporter en PDF…", self.export_pdf), ("Exporter en CSV…", self.export_csv)):
             b = QPushButton(label)
             b.clicked.connect(slot)
             h.addWidget(b)
@@ -448,6 +460,33 @@ class MainCouranteDock(QDockWidget):
         self.b_save.setText(f"Enregistrer la modification du n° {r.get('n')}")
         self.b_clear.setText("Annuler la modification")
         self.ed_msg.setFocus()
+
+    def _table_menu(self, pos):
+        from PySide6.QtWidgets import QMenu
+        rows = sorted({i.row() for i in self.tbl.selectedIndexes()})
+        if not rows:
+            return
+        m = QMenu(self)
+        if len(rows) == 1:
+            m.addAction("Modifier ce message", lambda: self.edit_row(rows[0]))
+        m.addAction(f"Supprimer ({len(rows)} message{'s' if len(rows) > 1 else ''})", self.delete_selected)
+        m.exec(self.tbl.viewport().mapToGlobal(pos))
+
+    def delete_selected(self):
+        rows = sorted({i.row() for i in self.tbl.selectedIndexes()})
+        recs = [self.rows[r] for r in rows if 0 <= r < len(self.rows)]
+        if not recs:
+            QMessageBox.information(self, "Supprimer", "Cliquez d'abord sur le message à supprimer.")
+            return
+        nums = ", ".join(f"n° {r.get('n')}" for r in recs)
+        if QMessageBox.question(self, "Supprimer", f"Supprimer définitivement {nums} de la main courante ?\n\n"
+                                "Les numéros des autres messages ne changent pas.") != QMessageBox.Yes:
+            return
+        for r in recs:
+            if self.editing and self.editing.get("id") == r["id"]:
+                self.clear_form()
+            self.journal.delete(r["id"])
+        self.refresh()
 
     def clear_form(self):
         self.editing = None

@@ -19,6 +19,15 @@ from . import __version__
 from . import cty
 from .geo import distance_bearing, from_locator
 
+CLUSTERS = [
+    ("dxc.ve7cc.net:23", "VE7CC (Canada), CC Cluster, très fréquenté"),
+    ("dxfun.com:8000", "DXFun (Pays-Bas), DXSpider"),
+    ("w3lpl.net:7373", "W3LPL (États-Unis), filtré, rapide"),
+    ("dxc.nc7j.com:23", "NC7J (États-Unis), AR-Cluster"),
+    ("gb7mbc.spoo.org:8000", "GB7MBC (Angleterre), DXSpider"),
+    ("dx.k3lr.com:23", "K3LR (États-Unis), concours"),
+    ("telnet.reversebeacon.net:7000", "RBN : spots CW/RTTY des skimmers"),
+]
 RBN_HOST = "telnet.reversebeacon.net"
 RBN_PORTS = (7000, 7001)          # 7000 : CW et RTTY, 7001 : FT8 / FT4
 RBN_INFO = re.compile(r"(-?\d+)\s*dB(?:\s+(\d+)\s*(WPM|BPS))?", re.I)
@@ -324,13 +333,21 @@ class SpotsDock(QDockWidget):
             pv.setContentsMargins(0, 4, 0, 0)
             if key == "dx":
                 dh = QHBoxLayout()
-                self.ed_host = QLineEdit(s.value("dx_host", "dxc.ve7cc.net:23"))
-                self.ed_host.setToolTip("Adresse:port du cluster (DXSpider, AR-Cluster…)")
+                self.cb_host = QComboBox()
+                self.cb_host.setEditable(True)
+                for host, desc in CLUSTERS:
+                    self.cb_host.addItem(f"{host}   — {desc}", host)
+                self.cb_host.setCurrentText(s.value("dx_host", CLUSTERS[0][0]))
+                self.cb_host.setToolTip("Choisissez un cluster dans la liste ou tapez une adresse hôte:port.\n"
+                                        "Si l'un ne répond pas, essayez le suivant.")
+                self.cb_host.activated.connect(lambda i: self.cb_host.setEditText(self.cb_host.itemData(i) or
+                                                                                   self.cb_host.currentText()))
+                self.ed_host = self.cb_host.lineEdit()
                 self.b_dx = QPushButton("Connecter")
                 self.b_dx.setCheckable(True)
                 self.b_dx.toggled.connect(self.toggle_cluster)
                 dh.addWidget(QLabel("Cluster"))
-                dh.addWidget(self.ed_host, 1)
+                dh.addWidget(self.cb_host, 1)
                 dh.addWidget(self.b_dx)
                 pv.addLayout(dh)
                 ah = QHBoxLayout()
@@ -783,7 +800,7 @@ class SpotsDock(QDockWidget):
 
     def toggle_cluster(self, on):
         if on:
-            host, _, port = self.ed_host.text().strip().rpartition(":")
+            host, _, port = (self.ed_host.text().strip().split() or [""])[0].rpartition(":")
             call = (self.win.settings.value("mycall", "") or "").strip().upper()
             if not host or not port.isdigit():
                 self.lb_status.setText("Adresse du cluster au format hôte:port")
@@ -908,7 +925,7 @@ class SpotsDock(QDockWidget):
         s.setValue("alert_beep", self.ck_beep.isChecked())
         for c in self.rbn:
             c.disconnect()
-        s.setValue("dx_host", self.ed_host.text())
+        s.setValue("dx_host", (self.ed_host.text().strip().split() or [""])[0])
         s.setValue("spots_every", self.sp_every.value())
         self.cluster.disconnect()
 

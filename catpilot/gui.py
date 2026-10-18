@@ -360,7 +360,7 @@ class MainWindow(QMainWindow):
         self.b_bigwf = QPushButton("Panoramique")
         self.b_bigwf.setCheckable(True)
         self.b_bigwf.setToolTip("Grande chute d'eau détachable")
-        self.dock_buttons = self.dock_buttons + (self.b_bigwf,)
+        self.dock_buttons = self.dock_buttons + (self.b_bigwf, self.b_mc)      # ADRASEC MC tout à droite
         for dock, btn in ((self.bigwf, self.b_bigwf), (self.digi, self.b_digi), (self.mc, self.b_mc), (self.mapdock, self.b_map), (self.remote, self.b_remote), (self.sat, self.b_sat), (self.sdr, self.b_sdr), (self.rotor, self.b_rot), (self.cw, self.b_cw), (self.dvk, self.b_dvk), (self.txa, self.b_txa),
                           (self.spots, self.b_spots), (self.logdock, self.b_log), (self.wsjtx, self.b_wsjtx)):
             self.addDockWidget(Qt.RightDockWidgetArea, dock)
@@ -788,11 +788,11 @@ class MainWindow(QMainWindow):
         self.b_digi = QPushButton("Numérique")
         self.b_digi.setCheckable(True)
         self.b_digi.setToolTip("FT8, FT4, RTTY, PSK31 et SSTV intégrés")
-        self.b_mc = QPushButton("Main courante")
+        self.b_mc = QPushButton("ADRASEC MC")
         self.b_mc.setCheckable(True)
         self.b_mc.setToolTip("Journal horodaté des messages (ADRASEC, sécurité civile)")
         self.dock_buttons = (self.b_spots, self.b_map, self.b_log, self.b_digi, self.b_wsjtx, self.b_mems, self.b_cw,
-                             self.b_dvk, self.b_txa, self.b_rot, self.b_sat, self.b_sdr, self.b_remote, self.b_mc)
+                             self.b_dvk, self.b_txa, self.b_rot, self.b_sat, self.b_sdr, self.b_remote)
         lv.addLayout(ll)
         lo = QHBoxLayout()
         self.ck_auto = QCheckBox("Se connecter au lancement du logiciel")
