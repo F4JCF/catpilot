@@ -127,7 +127,7 @@ class FT991A(RigDriver):
         """Mémorise les 40 derniers échanges (journal en cas de coupure)."""
         import collections
         if not hasattr(self, "history"):
-            self.history = collections.deque(maxlen=40)
+            self.history = collections.deque(maxlen=150)
         self.history.append(f"{time.strftime('%H:%M:%S')}.{int(time.time() * 1000) % 1000:03d} {way} {text}")
 
     def diagnostics(self):
@@ -209,6 +209,11 @@ class FT991A(RigDriver):
         raise RigError("le poste ne s'est pas allumé (alimentation 13,8 V coupée ?)")
 
     def power_off(self):
+        # « ; » d'abord pour réveiller le processeur CAT, puis l'ordre d'extinction, répété.
+        self._write(";")
+        time.sleep(0.3)
+        self._write("PS0;")
+        time.sleep(0.5)
         self._write("PS0;")
         time.sleep(0.3)
 

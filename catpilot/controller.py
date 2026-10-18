@@ -88,14 +88,25 @@ class RigController(QObject):
             if power_off and was:
                 try:
                     self.driver.power_off()
-                except Exception:
-                    pass
+                    cat_log("extinction : ordre PS0 envoyé au poste")
+                except Exception as e:
+                    cat_log(f"extinction impossible : {e}")
             self.driver.close()
             self.driver = None
         self.connected = False
         if was:
             cat_log("déconnexion")
             self.status_changed.emit(False, "Déconnecté")
+
+    def power_off_port(self, driver):
+        """Extinction quand la liaison n'est plus ouverte (coupure) : on rouvre le port le temps d'envoyer PS0."""
+        try:
+            driver.open()
+            driver.power_off()
+            driver.close()
+            cat_log(f"extinction : port {driver.port} rouvert, ordre PS0 envoyé")
+        except Exception as e:
+            cat_log(f"extinction impossible : {e}")
 
     # --- ordres ----------------------------------------------------------
     def _set(self, key, value):
@@ -192,9 +203,11 @@ class RigController(QObject):
             self.message.emit("Allumage du poste…")
             try:
                 done = self.driver.power_on()
+                cat_log("allumage : " + ("poste allumé" if done else "le poste répondait déjà, rien à faire"))
                 self.message.emit(("Poste allumé" if done else "Poste déjà allumé")
                                   + f" : {self.driver.name} sur {self.driver.port}")
             except Exception as e:
+                cat_log(f"allumage impossible : {e}")
                 self.message.emit(f"Allumage impossible : {e}")
         last_ok = time.monotonic()
         while self._running:
@@ -210,6 +223,10 @@ class RigController(QObject):
                 self.state_changed.emit(self._merge(tmp))
             except Exception as e:
                 errors += 1
+                if errors == 1 and hasattr(self.driver, "diagnostics"):
+                    cat_log("échanges juste avant le premier silence du poste :")
+                    for ln in self.driver.diagnostics()[-60:]:
+                        cat_log("    " + ln)
                 if errors <= 3 or errors % 20 == 0:
                     cat_log(f"erreur {errors} : {type(e).__name__} : {e}")
                 # liaison perdue seulement après plusieurs échecs ET plusieurs secondes sans réponse
@@ -223,7 +240,7 @@ class RigController(QObject):
                 if errors >= MAX_ERRORS and time.monotonic() - last_ok > LOST_AFTER:
                     if hasattr(self.driver, "diagnostics"):
                         cat_log("derniers échanges avant la coupure :")
-                        for ln in self.driver.diagnostics():
+                        for ln in self.driver.diagnostics()[-25:]:
                             cat_log("    " + ln)
                     self._running = False
                     self.connected = False

@@ -887,7 +887,19 @@ class MainWindow(QMainWindow):
         if self.ctrl.connected and power_off:
             self.statusBar().showMessage("Extinction du poste…")
             QApplication.processEvents()
+        was = self.ctrl.connected
         self.ctrl.disconnect_rig(power_off=power_off)
+        if power_off and not was:
+            # liaison perdue avant la fermeture : on envoie quand même l'ordre d'extinction
+            cls = DRIVERS.get(self.cb_rig.currentText())
+            port = self.cb_port.currentData()
+            if cls and port and cls is not SimDriver and not getattr(cls, "is_remote", False) \
+                    and hasattr(cls, "power_off"):
+                try:
+                    self.ctrl.power_off_port(cls(port, int(self.cb_baud.currentText()),
+                                                 int(self.cb_stop.currentText())))
+                except Exception:
+                    pass
         if self.server:
             self.server.stop()
         super().closeEvent(e)
