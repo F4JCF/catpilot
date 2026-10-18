@@ -6,6 +6,8 @@ curseurs) sont fusionnés : seule la dernière valeur de chaque réglage part.
 Après un ordre, la valeur lue sur le poste est ignorée un court instant pour
 éviter que le bouton ne « saute » en arrière.
 """
+import datetime
+import os
 import queue
 import threading
 import time
@@ -20,6 +22,20 @@ LOST_AFTER = 6.0      # s sans aucune lecture réussie avant de déclarer la lia
 HOLD = 1.2           # s pendant lesquelles une valeur réglée prime sur la lecture
 CORE = ("freq", "mode", "ptt")
 METERS = ("smeter", "s_text", "s_db", "po", "swr", "swr_val", "alc")
+
+
+def cat_log(text):
+    """Journal de la liaison CAT (Documents/CATPilot/journal_cat.txt), pour comprendre une coupure."""
+    try:
+        d = os.path.join(os.path.expanduser("~"), "Documents", "CATPilot")
+        os.makedirs(d, exist_ok=True)
+        path = os.path.join(d, "journal_cat.txt")
+        if os.path.exists(path) and os.path.getsize(path) > 1_000_000:
+            os.replace(path, path + ".old")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(f"{datetime.datetime.now():%Y-%m-%d %H:%M:%S}  {text}\n")
+    except OSError:
+        pass
 
 
 class RigController(QObject):
@@ -54,6 +70,7 @@ class RigController(QObject):
         self.connected = True
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
+        cat_log(f"connexion : {driver.name} sur {driver.port} à {getattr(driver, 'baud', '?')} bauds")
         self.status_changed.emit(True, f"Connecté : {driver.name} sur {driver.port}")
 
     def disconnect_rig(self, power_off=False):
@@ -77,6 +94,7 @@ class RigController(QObject):
             self.driver = None
         self.connected = False
         if was:
+            cat_log("déconnexion")
             self.status_changed.emit(False, "Déconnecté")
 
     # --- ordres ----------------------------------------------------------
@@ -185,16 +203,21 @@ class RigController(QObject):
                 self._run_actions()
                 tmp = self.snapshot()
                 self.driver.poll(tmp)
+                if errors >= 3:
+                    cat_log(f"liaison rétablie après {errors} erreurs")
                 errors = 0
                 last_ok = time.monotonic()
                 self.state_changed.emit(self._merge(tmp))
             except Exception as e:
                 errors += 1
+                if errors <= 3 or errors % 20 == 0:
+                    cat_log(f"erreur {errors} : {type(e).__name__} : {e}")
                 # liaison perdue seulement après plusieurs échecs ET plusieurs secondes sans réponse
                 # (un refus « ?; » ou un message en travers pendant la CW ne suffit pas)
                 if errors >= MAX_ERRORS and time.monotonic() - last_ok > LOST_AFTER:
                     self._running = False
                     self.connected = False
+                    cat_log(f"LIAISON PERDUE après {errors} erreurs : {e}")
                     self.status_changed.emit(False, f"Liaison perdue avec le poste : {e}")
                     break
             time.sleep(POLL_INTERVAL)

@@ -739,7 +739,7 @@ class MainWindow(QMainWindow):
         self.cb_stop = QComboBox()
         self.cb_stop.addItems(["1", "2"])
         self.b_conn = QPushButton("Connecter")
-        self.b_conn.clicked.connect(self.toggle_connection)
+        self.b_conn.clicked.connect(lambda: self.toggle_connection())
         for w in (self.cb_rig, QLabel("Port"), self.cb_port, b_ref, QLabel("Vitesse"),
                   self.cb_baud, QLabel("Stop"), self.cb_stop, self.b_conn):
             ll.addWidget(w)
@@ -929,7 +929,9 @@ class MainWindow(QMainWindow):
                 or self.cb_port.findData(self.settings.value("port", "")) >= 0:
             self.toggle_connection()
 
-    def toggle_connection(self):
+    def toggle_connection(self, quiet=False):
+        if not quiet and getattr(self, "_reconnect", None):
+            self._reconnect.stop()                   # l'utilisateur reprend la main
         if self.ctrl.connected:
             self.ctrl.disconnect_rig()
             return
@@ -952,6 +954,9 @@ class MainWindow(QMainWindow):
                                       int(self.cb_stop.currentText())),
                                   power_on=self.ck_on.isChecked())
         except Exception as e:
+            if quiet:
+                self.statusBar().showMessage(f"Reconnexion impossible pour l'instant ({e}) ; nouvel essai dans 5 s")
+                return
             if getattr(cls, "is_remote", False):
                 QMessageBox.critical(self, "Connexion impossible", f"La station {port} n'a pas pu être jointe.\n\n{e}")
                 return
@@ -960,9 +965,20 @@ class MainWindow(QMainWindow):
                                  "Vérifiez qu'aucun autre logiciel ne l'utilise déjà.")
 
     def on_status(self, ok, msg):
+        lost = not ok and msg.startswith("Liaison perdue")
         if not ok and self.ctrl.driver:          # liaison perdue : on libère le port
             self.ctrl.disconnect_rig()
         self.statusBar().showMessage(msg)
+        if ok and getattr(self, "_reconnect", None) and self._reconnect.isActive():
+            self._reconnect.stop()
+            self.statusBar().showMessage(msg + " (reconnecté automatiquement)")
+        if lost and self.settings.value("auto_reconnect", "true") in (True, "true"):
+            if not getattr(self, "_reconnect", None):
+                self._reconnect = QTimer(self)
+                self._reconnect.timeout.connect(self._try_reconnect)
+            self._reconnect_n = 0
+            self._reconnect.start(5000)
+            self.statusBar().showMessage(msg + " — reconnexion automatique dans 5 s")
         self.b_conn.setText("Déconnecter" if ok else "Connecter")
         self.cb_rig.setEnabled(not ok)
         for w in (self.cb_port, self.cb_baud, self.cb_stop):
@@ -976,6 +992,29 @@ class MainWindow(QMainWindow):
             self.meter_swr.set_value(0)
         self._set_enabled(ok)
         self._adapt_to_rig(self.ctrl.driver if ok else DRIVERS.get(self.cb_rig.currentText()))
+
+    def open_cat_log(self):
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        path = os.path.join(os.path.expanduser("~"), "Documents", "CATPilot", "journal_cat.txt")
+        if not os.path.exists(path):
+            QMessageBox.information(self, "Journal CAT", "Le journal est encore vide.")
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    def _try_reconnect(self):
+        if self.ctrl.connected:
+            self._reconnect.stop()
+            return
+        self._reconnect_n += 1
+        from .controller import cat_log
+        cat_log(f"reconnexion automatique, essai {self._reconnect_n}")
+        keep = self.ck_on.isChecked()
+        self.ck_on.setChecked(False)              # pas de rallumage pendant une reconnexion
+        try:
+            self.toggle_connection(quiet=True)
+        finally:
+            self.ck_on.setChecked(keep)
 
     def _set_enabled(self, on):
         for w in self.controls:
@@ -1556,6 +1595,14 @@ class MainWindow(QMainWindow):
         self.backup.status.connect(lambda m: self.statusBar().showMessage(m, 10000))
         from .scheduler import Scheduler
         self.scheduler = Scheduler(self)
+        a3 = QAction("Reconnexion automatique si la liaison est perdue", self, checkable=True)
+        a3.setChecked(s.value("auto_reconnect", "true") in (True, "true"))
+        a3.toggled.connect(lambda on: self.settings.setValue("auto_reconnect", "true" if on else "false"))
+        self.menu_poste.addSeparator()
+        self.menu_poste.addAction(a3)
+        a4 = QAction("Ouvrir le journal de la liaison CAT", self)
+        a4.triggered.connect(self.open_cat_log)
+        self.menu_poste.addAction(a4)
         a2 = QAction("Analyseur de SWR (balayage d'une bande)…", self)
         a2.triggered.connect(self.swr_dialog)
         self.menu_poste.addAction(a2)

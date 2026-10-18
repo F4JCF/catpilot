@@ -350,6 +350,8 @@ EXACT = {
     "Ordre": "Order", "Demande": "Request", "Compte rendu": "Report", "Point de situation": "Situation report", "Bilan": "Summary",
     "Alerte": "Alert", "Contrôle radio": "Radio check", "Accusé de réception": "Acknowledgement", "Relève": "Shift change", "Autre": "Other",
     "Annuler la modification": "Cancel editing", "Double-clic sur un message pour le modifier (la date de modification est notée)": "Double-click a message to edit it (the edit date is recorded)",
+    "Reconnexion automatique si la liaison est perdue": "Reconnect automatically if the link is lost",
+    "Ouvrir le journal de la liaison CAT": "Open the CAT link journal",
     "Compte QRZ.com": "QRZ.com account", "Mot de passe QRZ.com": "QRZ.com password",
     "Ouvrir la fiche de l'indicatif sur QRZ.com": "Open the callsign page on QRZ.com",
     "Ouvrir la fiche de l'indicatif sur HamQTH.com": "Open the callsign page on HamQTH.com",
