@@ -353,3 +353,129 @@ class FreqAnnouncer:
         if self.last and self.last != self.said:
             self.said = self.last
             self.sp.say(f"{spoken_freq(self.last[0] * 100)}, {MODE_SPOKEN.get(self.last[1], self.last[1])}")
+
+
+# --- panneaux en grand ---------------------------------------------------------------------------
+class FocusHeader(QWidget):
+    """Bandeau réduit de la face avant : fréquence, plan de bande, S-mètre, SWR et ALC."""
+
+    def __init__(self, win):
+        super().__init__()
+        from PySide6.QtWidgets import QFrame, QProgressBar
+        from .bandplan import BandPlanBar
+        from .gui import BANDS, AnalogMeter, FreqDisplay, S_SCALE, SWR_SCALE
+        self.win = win
+        h = QHBoxLayout(self)
+        h.setContentsMargins(6, 6, 6, 0)
+        left = QFrame()
+        left.setObjectName("panel")
+        lv = QVBoxLayout(left)
+        self.freq = FreqDisplay()
+        self.freq.tune.connect(win.tune_by)
+        lv.addWidget(self.freq)
+        self.bp = BandPlanBar(BANDS)
+        lv.addWidget(self.bp)
+        lv.addStretch()
+        right = QFrame()
+        right.setObjectName("panel")
+        rv = QVBoxLayout(right)
+        mh = QHBoxLayout()
+        self.ms = AnalogMeter("S-mètre", S_SCALE, 130 / 255)
+        self.mw = AnalogMeter("SWR", SWR_SCALE, 89 / 255)
+        mh.addWidget(self.ms)
+        mh.addWidget(self.mw)
+        rv.addLayout(mh)
+        ah = QHBoxLayout()
+        ah.addWidget(QLabel("ALC"))
+        self.alc = QProgressBar()
+        self.alc.setRange(0, 1000)
+        self.alc.setTextVisible(False)
+        self.alc.setFixedHeight(10)
+        ah.addWidget(self.alc, 1)
+        self.lb = QLabel("")
+        self.lb.setObjectName("value")
+        self.lb.setMinimumWidth(110)
+        self.lb.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        ah.addWidget(self.lb)
+        rv.addLayout(ah)
+        h.addWidget(left, 1)
+        h.addWidget(right, 1)
+        self.t = QTimer(self)
+        self.t.timeout.connect(self.sync)
+        self.t.start(40)
+
+    def sync(self):
+        if not self.isVisible():
+            return
+        w = self.win
+        if self.freq.text() != w.freq.text():
+            self.freq.setText(w.freq.text())
+        if self.freq.styleSheet() != w.freq.styleSheet():
+            self.freq.setStyleSheet(w.freq.styleSheet())
+        for dst, src in ((self.ms, w.meter_s), (self.mw, w.meter_swr)):
+            if (dst.title, dst.scale, dst.red_from) != (src.title, src.scale, src.red_from):
+                dst.set_scale(src.title, src.scale, src.red_from)
+            dst.target = src.target
+        self.alc.setValue(w.bar_alc.value())
+        self.lb.setText(w.lb_meter.text())
+        self.bp.dim = w.bandplan.dim
+        st = w._last
+        if st and w.ctrl.connected:
+            self.bp.set_freq(st.freq, st.ptt)
+
+
+class FocusMode:
+    """Un panneau ouvert prend toute la fenêtre ; la face avant se réduit au bandeau ci-dessus."""
+
+    def __init__(self, win, docks, stack, header):
+        self.win, self.docks, self.stack, self.header = win, docks, stack, header
+        self.on = False
+        self.enabled = win.settings.value("focus_panels", "true") in (True, "true")
+        self.last = None
+        self.current = None
+        for d in docks:
+            d.visibilityChanged.connect(lambda vis, dd=d: self._changed(dd, vis))
+            d.topLevelChanged.connect(lambda _f: QTimer.singleShot(0, self.update))
+
+    def _open(self, d):
+        return d.toggleViewAction().isChecked() and not d.isFloating()
+
+    def _changed(self, d, vis):
+        if vis and self.enabled and not d.isFloating() and d is not self.current:
+            # un seul panneau à la fois : celui qu'on ouvre remplace le précédent
+            self.current = d
+            for o in self.docks:
+                if o is not d and self._open(o):
+                    o.close()
+        QTimer.singleShot(0, self.update)
+
+    def set_enabled(self, on):
+        self.enabled = on
+        self.win.settings.setValue("focus_panels", "true" if on else "false")
+        self.update()
+
+    def update(self):
+        w = self.win
+        opened = [d for d in self.docks if self._open(d)]
+        want = self.enabled and bool(opened)
+        if want:
+            for d in opened:
+                if w.dockWidgetArea(d) != Qt.BottomDockWidgetArea:
+                    w.addDockWidget(Qt.BottomDockWidgetArea, d)
+                    d.show()
+        if not opened:
+            self.current = None
+        if want == self.on:
+            return
+        self.on = want
+        if want:
+            self.stack.setCurrentIndex(1)
+            self.stack.setMaximumHeight(self.header.sizeHint().height() + 6)
+            self.header.sync()
+        else:
+            self.stack.setCurrentIndex(0)
+            self.stack.setMaximumHeight(16777215)
+            for d in self.docks:              # prochaine ouverture hors de ce mode : à droite, comme avant
+                if not self._open(d) and w.dockWidgetArea(d) == Qt.BottomDockWidgetArea:
+                    w.addDockWidget(Qt.RightDockWidgetArea, d)
+                    d.hide()

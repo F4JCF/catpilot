@@ -344,6 +344,8 @@ EXACT = {
     "Sauvegarder automatiquement une fois par jour": "Back up automatically once a day",
     "Modèle…": "Template…", "Gérer les modèles…": "Manage templates…", "Modèles de messages": "Message templates",
     "Noter aussi les QSO du carnet dans cette main courante": "Also record logged QSOs in this log sheet",
+    "Panneaux en grand (face avant réduite)": "Large panels (reduced front panel)",
+    "Un panneau ouvert prend toute la fenêtre ; restent la fréquence et les galvanomètres": "An open panel fills the window; frequency and meters stay visible",
     "Compte QRZ.com": "QRZ.com account", "Mot de passe QRZ.com": "QRZ.com password",
     "Ouvrir la fiche de l'indicatif sur QRZ.com": "Open the callsign page on QRZ.com",
     "Ouvrir la fiche de l'indicatif sur HamQTH.com": "Open the callsign page on HamQTH.com",

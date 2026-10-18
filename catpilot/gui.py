@@ -365,6 +365,18 @@ class MainWindow(QMainWindow):
             dock.visibilityChanged.connect(btn.setChecked)
         self._build_toolbar_and_menus()
         self._build_extras()
+        from .extras import FocusHeader, FocusMode
+        self.focus_header = FocusHeader(self)
+        self.stack.addWidget(self.focus_header)
+        all_docks = [self.mem, self.bigwf, self.digi, self.mc, self.mapdock, self.remote, self.sat, self.sdr,
+                     self.rotor, self.cw, self.dvk, self.txa, self.spots, self.logdock, self.wsjtx]
+        self.focus = FocusMode(self, all_docks, self.stack, self.focus_header)
+        a = QAction("Panneaux en grand (face avant réduite)", self, checkable=True)
+        a.setChecked(self.focus.enabled)
+        a.setToolTip("Un panneau ouvert prend toute la fenêtre ; restent la fréquence et les galvanomètres")
+        a.toggled.connect(self.focus.set_enabled)
+        self.menu_aff.addAction(a)
+        QTimer.singleShot(0, self.focus.update)
         self.compact = CompactWindow(self, FreqDisplay, BANDS, MODE_LABELS)
         self.compact.restore.connect(self.restore_from_compact)
         self.nmea = NmeaReader()
@@ -444,7 +456,10 @@ class MainWindow(QMainWindow):
         g = QGridLayout(root)
         g.setSpacing(6)
         g.setContentsMargins(6, 6, 6, 6)
-        self.setCentralWidget(root)
+        from PySide6.QtWidgets import QStackedWidget
+        self.stack = QStackedWidget()
+        self.stack.addWidget(root)
+        self.setCentralWidget(self.stack)
 
         # Bandes
         pb = Panel("Bandes")
