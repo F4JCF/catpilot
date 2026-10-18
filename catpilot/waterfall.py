@@ -95,6 +95,9 @@ class Waterfall(QWidget):
         self.message = "Chute d'eau arrêtée"
         self.marker = None            # fréquence audio où un clic amène le signal
         self.cw_marker = None         # note suivie par le décodeur CW
+        self.markers = {}             # repères des modes numériques : nom -> (Hz, couleur, texte)
+        self.inject = []              # simulateur : signal émis renvoyé dans la réception
+        self.last_mods = Qt.NoModifier
         self.listeners = []           # fonctions(échantillons, fréquence d'échantillonnage)
         from .cwdecoder import CwGenerator
         self._cwgen = CwGenerator("CQ CQ CQ DE F4JCF F4JCF K", wpm=20, freq=900.0, amp=0.12)
@@ -108,6 +111,7 @@ class Waterfall(QWidget):
     # --- démarrage / arrêt --------------------------------------------------
     def start(self, device):
         self.stop()
+        self._test_clock = None
         self.floor = None
         self.hist = np.zeros(0, np.float32)
         if device == TEST_DEVICE:
@@ -170,10 +174,22 @@ class Waterfall(QWidget):
         x = np.random.normal(0, 0.02, n).astype(np.float32)
         for f, a, period in ((620, 0.05, 15), (1180, 0.02, 15), (1525, 0.08, 15),
                              (2230, 0.03, 7.5), (2760, 0.015, 15)):
+            if not getattr(self, "test_tones", True):
+                break
             if (self._t // period) % 2 == (0 if f != 1180 else 1):
                 fm = f + 6.25 * ((t * 6.25).astype(int) % 8)        # 8 tonalités
                 x += a * np.sin(2 * math.pi * fm * t).astype(np.float32)
-        x += self._cwgen.samples(t)                                  # un appel CW à 900 Hz
+        if getattr(self, "test_cw", True):
+            x += self._cwgen.samples(t)                              # un appel CW à 900 Hz
+        # retour de l'émission (simulateur) : chaque élément [échantillons, position]
+        for item in list(self.inject):
+            sig, pos = item[0], item[1]
+            scale = item[2] if len(item) > 2 else 0.05
+            k = min(n, len(sig) - pos)
+            if k > 0:
+                x[:k] += sig[pos:pos + k] * scale
+                item[1] += k
+        self.inject[:] = [it for it in self.inject if it[1] < len(it[0])]
         self._t += n / self.sr
         return x
 
@@ -181,7 +197,11 @@ class Waterfall(QWidget):
     def _tick(self):
         new = []
         if self.test:
-            new.append(self._test_samples(0.06))
+            now = time.monotonic()
+            last = getattr(self, "_test_clock", None)
+            dt = 0.06 if last is None else min(0.5, now - last)   # calé sur l'horloge réelle
+            self._test_clock = now
+            new.append(self._test_samples(dt))
         while self.chunks:
             new.append(self.chunks.popleft())
         if not new:
@@ -233,6 +253,14 @@ class Waterfall(QWidget):
             x = r.width() * self.marker / self.FMAX
             p.setPen(QPen(QColor(255, 255, 255, 110), 1, Qt.DashLine))
             p.drawLine(int(x), 18, int(x), int(r.height()))
+        for name, (hz, color, label) in list(self.markers.items()):
+            if hz is None:
+                continue
+            x = r.width() * hz / self.FMAX
+            c = QColor(color)
+            p.setPen(QPen(c, 2))
+            p.drawLine(int(x), 18, int(x), int(r.height()))
+            p.drawText(QRectF(x + 3, 34 if name == "tx" else 18, 60, 14), Qt.AlignLeft | Qt.AlignVCenter, label)
         if self.cw_marker:
             x = r.width() * self.cw_marker / self.FMAX
             p.setPen(QPen(QColor(255, 160, 40, 200), 2))
@@ -246,6 +274,7 @@ class Waterfall(QWidget):
         self.hover.emit(round(e.position().x() / max(1, self.width()) * self.FMAX))
 
     def mousePressEvent(self, e):
+        self.last_mods = e.modifiers()
         if e.button() == Qt.LeftButton:
             self.clicked.emit(round(e.position().x() / max(1, self.width()) * self.FMAX))
 

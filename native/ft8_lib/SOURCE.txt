@@ -1,0 +1,2 @@
+ft8_lib de Kārlis Goba (YL3JG), https://github.com/kgoba/ft8_lib, commit 9fec6ca, licence MIT (voir LICENSE).
+Modification CAT Pilot : niveau de journal LOG_ERROR (pas d'affichage de débogage).

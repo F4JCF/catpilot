@@ -5,3 +5,5 @@ sounddevice>=0.4.6
 sgp4>=2.22
 pyrtlsdr>=0.3
 pyrtlsdrlib>=0.0.6
+sstv>=0.2.0
+pillow>=10

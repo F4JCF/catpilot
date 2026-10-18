@@ -3,3 +3,5 @@ __pycache__/
 build/
 dist/
 *.spec
+catpilot/libft8lib.so
+catpilot/ft8lib.dll

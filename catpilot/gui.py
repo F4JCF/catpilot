@@ -24,6 +24,7 @@ from .drivers.sim import SimDriver
 from .docks import CwDock, MenuEditor, TxAudioDock
 from .mapdock import MapDock
 from .maincourante import MainCouranteDock
+from .digidock import DigiDock
 from .memdock import MemoryDock, backup_dir
 from .propagation import FR as PROP_FR, Propagation
 from .updater import PAGE as RELEASES_PAGE, Updater, can_self_update, install_and_restart, is_newer
@@ -310,7 +311,8 @@ class MainWindow(QMainWindow):
         self.remote = RemoteDock(self)
         self.mapdock = MapDock(self)
         self.mc = MainCouranteDock(self)
-        for dock, btn in ((self.mc, self.b_mc), (self.mapdock, self.b_map), (self.remote, self.b_remote), (self.sat, self.b_sat), (self.sdr, self.b_sdr), (self.rotor, self.b_rot), (self.cw, self.b_cw), (self.dvk, self.b_dvk), (self.txa, self.b_txa),
+        self.digi = DigiDock(self)
+        for dock, btn in ((self.digi, self.b_digi), (self.mc, self.b_mc), (self.mapdock, self.b_map), (self.remote, self.b_remote), (self.sat, self.b_sat), (self.sdr, self.b_sdr), (self.rotor, self.b_rot), (self.cw, self.b_cw), (self.dvk, self.b_dvk), (self.txa, self.b_txa),
                           (self.spots, self.b_spots), (self.logdock, self.b_log), (self.wsjtx, self.b_wsjtx)):
             self.addDockWidget(Qt.RightDockWidgetArea, dock)
             self.tabifyDockWidget(self.mem, dock)
@@ -715,10 +717,13 @@ class MainWindow(QMainWindow):
         self.b_remote.setCheckable(True)
         self.b_map = QPushButton("Carte")
         self.b_map.setCheckable(True)
+        self.b_digi = QPushButton("Numérique")
+        self.b_digi.setCheckable(True)
+        self.b_digi.setToolTip("FT8, FT4, RTTY, PSK31 et SSTV intégrés")
         self.b_mc = QPushButton("Main courante")
         self.b_mc.setCheckable(True)
         self.b_mc.setToolTip("Journal horodaté des messages (ADRASEC, sécurité civile)")
-        self.dock_buttons = (self.b_spots, self.b_map, self.b_log, self.b_wsjtx, self.b_mems, self.b_cw,
+        self.dock_buttons = (self.b_spots, self.b_map, self.b_log, self.b_digi, self.b_wsjtx, self.b_mems, self.b_cw,
                              self.b_dvk, self.b_txa, self.b_rot, self.b_sat, self.b_sdr, self.b_remote, self.b_mc)
         lv.addLayout(ll)
         lo = QHBoxLayout()
@@ -806,6 +811,7 @@ class MainWindow(QMainWindow):
         self.spots.save_settings(s)
         self.mapdock.save_settings(s)
         self.mc.save_settings(s)
+        self.digi.save_settings(s)
         self.logdock.save_settings(s)
         self.wsjtx.save_settings(s)
         self.rotor.save_settings(s)
@@ -1091,7 +1097,7 @@ class MainWindow(QMainWindow):
             m.addAction(a)
         aff = mb.addMenu("Affichage")
         for label, btn in (("Spots POTA, SOTA et DX", self.b_spots), ("Carte et ligne grise", self.b_map),
-                           ("Carnet de trafic", self.b_log),
+                           ("Carnet de trafic", self.b_log), ("Modes numériques (FT8, RTTY, PSK31, SSTV)", self.b_digi),
                            ("WSJT-X", self.b_wsjtx), ("Mémoires et scan", self.b_mems),
                            ("CW au clavier", self.b_cw), ("Messages vocaux", self.b_dvk),
                            ("Audio d'émission", self.b_txa), ("Rotor d'antenne", self.b_rot),
@@ -1308,6 +1314,9 @@ class MainWindow(QMainWindow):
 
     # --- chute d'eau : clic pour s'accorder ------------------------------------------------------
     def on_wf_click(self, audio_hz):
+        digi = getattr(self, "digi", None)
+        if digi and digi.isVisible() and digi.wf_click(audio_hz, self.wf.last_mods):
+            return                                # le panneau numérique prend le clic
         st = self._last
         if not (st and self.ctrl.connected) or self.wf.marker is None:
             return
@@ -1645,6 +1654,8 @@ class MainWindow(QMainWindow):
             self.mem.b_scan.setChecked(False)
         self.cw.stop()
         self.dvk.stop()
+        self.digi.ftx.halt()
+        self.digi.tx.stop()
 
     def open_menu_editor(self, flt):
         if not self.ctrl.connected:

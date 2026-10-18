@@ -14,7 +14,15 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt pyinstaller
-      - run: pyinstaller --noconfirm --onefile --windowed --name CATPilot --icon assets/catpilot.ico --add-data "assets;assets" --collect-all pyrtlsdrlib run.py
+      - name: Bibliothèque FT8 (ft8_lib)
+        shell: pwsh
+        run: |
+          if (-not (Get-Command gcc -ErrorAction SilentlyContinue)) { choco install mingw -y --no-progress; $env:Path = "C:\ProgramData\mingw64\mingw64\bin;" + $env:Path }
+          gcc --version
+          python native/build_ft8.py
+          if (-not (Test-Path catpilot/ft8lib.dll)) { throw "ft8lib.dll absente" }
+          python -c "import ctypes; ctypes.CDLL(r'catpilot/ft8lib.dll'); print('ft8lib OK')"
+      - run: pyinstaller --noconfirm --onefile --windowed --name CATPilot --icon assets/catpilot.ico --add-data "assets;assets" --add-binary "catpilot/ft8lib.dll;." --collect-all pyrtlsdrlib --collect-all sstv run.py
       - name: Version
         id: ver
         shell: bash

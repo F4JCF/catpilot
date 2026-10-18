@@ -1,4 +1,7 @@
-Nouveautés de la 0.17.0 :
-- Carnet > Envoi en ligne : QRZ.com (clé API du carnet), eQSL, Club Log et LoTW (par TQSL). Envoi d'un clic, ou automatique à chaque QSO. Chaque service garde la trace de ce qui a déjà été envoyé. Les QSO déjà présents et ceux importés ne partent pas d'office.
-- Carnet > Diplômes et statistiques : pays DXCC par bande, continents (WAC), zones CQ (WAZ) et ITU, carrés locator (VUCC), parcs POTA chassés et activés, tableau bandes et modes. Export CSV.
-- Nouveau panneau « Main courante » pour l'ADRASEC : une liste numérotée par opération ou exercice, heure figée dès la saisie, moyen radio pris sur le poste, priorités en couleur (urgent, très urgent), suite donnée modifiable. Export PDF (A4 paysage, avec visa du responsable) et CSV.
+Nouveautés de la 0.18.0 : les modes numériques, sans logiciel en plus.
+Nouveau panneau « Numérique » (bouton en bas). Réception par l'audio USB du poste, émission en DATA-U par sa sortie audio USB. Réglez « Sortie audio » (USB Audio CODEC) et « Niveau » en bas du panneau : l'ALC ne doit pas bouger.
+
+- FT8 et FT4 : décodage de chaque créneau calé sur l'heure UTC (l'horloge du PC doit être juste à la seconde près), rapport en dB, DT, pays et distance. Couleurs : vert CQ, rouge pour vous, orange pays jamais contacté. Double-clic sur un CQ : CAT Pilot répond et mène le QSO jusqu'au 73 (séquence automatique comme WSJT-X), puis le note au carnet (et l'envoie en ligne si c'est réglé). « Appeler CQ » pour lancer vos appels. Maj+clic dans la chute d'eau pour choisir la fréquence d'émission. Moteur ft8_lib : un peu moins sensible que WSJT-X (environ 2 dB).
+- RTTY 45 bauds et PSK31 : texte reçu en clair (clic dans la chute d'eau sur le signal), AFC, squelch, texte à émettre et 6 messages programmables (clic droit pour les modifier).
+- SSTV : réception des images avec reconnaissance du mode (Robot, Martin, Scottie, PD), galerie et enregistrement dans Documents/CATPilot/sstv. Émission d'une image de votre choix, avec votre texte écrit dessus.
+- Sans poste (« Signal de test ») : une petite bande FT8 simulée répond à vos appels, pour s'entraîner sans émettre.
