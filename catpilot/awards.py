@@ -19,10 +19,12 @@ BANDS = ["160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m", 
 class UploadDialog(QDialog):
     FIELDS = {
         "qrz": [("qrz_logkey", "Clé API du carnet QRZ", False)],
-        "eqsl": [("eqsl_user", "Utilisateur eQSL", False), ("eqsl_pass", "Mot de passe eQSL", True)],
+        "eqsl": [("eqsl_user", "Utilisateur eQSL", False), ("eqsl_pass", "Mot de passe eQSL", True),
+                 ("eqsl_nick", "Surnom du QTH eQSL (facultatif)", False)],
         "clublog": [("clublog_email", "E-mail Club Log", False), ("clublog_pass", "Mot de passe Club Log", True),
                     ("clublog_api", "Clé API Club Log", False)],
-        "lotw": [("tqsl_path", "Chemin de tqsl.exe", False), ("tqsl_location", "Lieu de station TQSL", False)],
+        "lotw": [("tqsl_path", "Chemin de tqsl.exe", False), ("tqsl_location", "Lieu de station TQSL", False),
+                 ("lotw_user", "Identifiant du site LoTW", False), ("lotw_pass", "Mot de passe du site LoTW", True)],
     }
     HELP = {
         "qrz": "Sur qrz.com : Logbook > Settings > « API Access Key ».",
@@ -30,7 +32,8 @@ class UploadDialog(QDialog):
         "clublog": "Club Log demande une clé API par logiciel : demandez-la sur clublog.org (Help > API), "
                    "puis collez-la ici.",
         "lotw": "Installez TQSL (ARRL), votre certificat et un « Station Location » : CAT Pilot lui confie la "
-                "signature et l'envoi. Indiquez le nom exact du lieu de station.",
+                "signature et l'envoi. Indiquez le nom exact du lieu de station. L'identifiant et le mot de passe "
+                "du site lotw.arrl.org servent à relever les confirmations reçues.",
     }
 
     def __init__(self, win):
@@ -75,6 +78,20 @@ class UploadDialog(QDialog):
             h.addWidget(b)
             f.addRow(h)
             v.addWidget(gb)
+        gb = QGroupBox("Confirmations reçues (QSL eQSL et LoTW)")
+        h = QHBoxLayout(gb)
+        self.ck_qsl = QCheckBox("Relever chaque jour au démarrage")
+        self.ck_qsl.setChecked(self.s.value("qsl_auto", "true") in (True, "true"))
+        h.addWidget(self.ck_qsl)
+        h.addStretch()
+        cc = win.log.confirmed_counts()
+        self.lb_conf = QLabel(f"confirmés : eQSL {cc['eqsl']}, LoTW {cc['lotw']}")
+        self.lb_conf.setObjectName("value")
+        h.addWidget(self.lb_conf)
+        b = QPushButton("Relever maintenant")
+        b.clicked.connect(self.sync_now)
+        h.addWidget(b)
+        v.addWidget(gb)
         self.lb = QLabel("")
         self.lb.setObjectName("hint")
         self.lb.setWordWrap(True)
@@ -82,6 +99,8 @@ class UploadDialog(QDialog):
         bb = QDialogButtonBox(QDialogButtonBox.Close)
         bb.rejected.connect(self.accept)
         v.addWidget(bb)
+        win.qsl_sync.progress.connect(self.lb.setText)
+        win.qsl_sync.finished.connect(self._sync_done)
         win.uploader.progress.connect(self.lb.setText)
         win.uploader.finished.connect(self._done)
 
@@ -90,6 +109,20 @@ class UploadDialog(QDialog):
             self.s.setValue(key, ed.text().strip() if "pass" not in key else ed.text())
         for svc, ck in self.autos.items():
             self.s.setValue(f"auto_{svc}", "true" if ck.isChecked() else "false")
+        self.s.setValue("qsl_auto", "true" if self.ck_qsl.isChecked() else "false")
+
+    def sync_now(self):
+        self.save()
+        if not any(self.win.qsl_sync.configured().values()):
+            self.lb.setText("Renseignez le compte eQSL et/ou l'identifiant et le mot de passe du site LoTW")
+            return
+        if not self.win.qsl_sync.run():
+            self.lb.setText("Relevé déjà en cours…")
+
+    def _sync_done(self, msg):
+        self.lb.setText(msg)
+        cc = self.win.log.confirmed_counts()
+        self.lb_conf.setText(f"confirmés : eQSL {cc['eqsl']}, LoTW {cc['lotw']}")
 
     def send_now(self, svc):
         self.save()
@@ -121,6 +154,8 @@ class UploadDialog(QDialog):
         try:
             self.win.uploader.progress.disconnect(self.lb.setText)
             self.win.uploader.finished.disconnect(self._done)
+            self.win.qsl_sync.progress.disconnect(self.lb.setText)
+            self.win.qsl_sync.finished.disconnect(self._sync_done)
         except (RuntimeError, TypeError):
             pass
         super().done(r)
@@ -181,7 +216,10 @@ class AwardsDialog(QDialog):
             e = cty.dxcc(r["call"] or "")
             info = cty.lookup(r["call"] or "")
             if e:
-                d = ent.setdefault(e["prefix"], {"e": e, "bands": set(), "modes": set(), "n": 0, "first": ""})
+                d = ent.setdefault(e["prefix"], {"e": e, "bands": set(), "modes": set(), "n": 0, "first": "",
+                                                 "conf": set()})
+                if "Y" in ((r.get("lotw_qsl_rcvd") or "") + (r.get("eqsl_qsl_rcvd") or "")).upper():
+                    d["conf"].add(band)
                 d["bands"].add(band)
                 d["modes"].add(mode)
                 d["n"] += 1
@@ -201,13 +239,14 @@ class AwardsDialog(QDialog):
 
         total_ent = len(cty.entities())
         # DXCC
-        t = _table(["Préfixe", "Pays", "Continent", "QSO", "1er QSO"] + BANDS)
+        t = _table(["Préfixe", "Pays", "Continent", "QSO", "1er QSO", "Confirmé"] + BANDS)
         data = []
         for pre, d in sorted(ent.items(), key=lambda x: french_name(x[1]["e"])):
             f = d["first"]
             data.append([pre, french_name(d["e"]), d["e"]["cont"], d["n"],
-                         f"{f[6:8]}/{f[4:6]}/{f[:4]}" if len(f) == 8 else f] + ["✓" if b in d["bands"] else "" for b in BANDS])
-        _fill(t, data, mark_cols=range(5, 5 + len(BANDS)))
+                         f"{f[6:8]}/{f[4:6]}/{f[:4]}" if len(f) == 8 else f, "✔" if d["conf"] else ""]
+                        + [("✔" if b in d["conf"] else "✓") if b in d["bands"] else "" for b in BANDS])
+        _fill(t, data, mark_cols=range(5, 6 + len(BANDS)))
         tabs.addTab(t, f"DXCC ({len(ent)})")
         # bandes DXCC
         per_band = {b: sum(1 for d in ent.values() if b in d["bands"]) for b in BANDS}
@@ -255,7 +294,8 @@ class AwardsDialog(QDialog):
             f"{len(grids)} carrés locator"
             + (f" (VUCC 50 : 6 m {vhf['6m']}, 2 m {vhf['2m']}, 70 cm {vhf['70cm']})" if any(vhf.values()) else "")
             + (f"\nPays par bande : {best}" if best else "")
-            + "\nComptes « contactés » : les confirmations (QSL, LoTW) ne sont pas encore relevées.")
+            + f"\n{sum(1 for d in ent.values() if d['conf'])} pays DXCC confirmés par eQSL ou LoTW "
+              "(✔ confirmé, ✓ contacté ; Carnet > Relever les confirmations).")
         bb = QDialogButtonBox(QDialogButtonBox.Close)
         bb.rejected.connect(self.accept)
         b = bb.addButton("Exporter en CSV…", QDialogButtonBox.ActionRole)

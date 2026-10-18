@@ -80,6 +80,14 @@ def run(path):
     for name, fn in (("FT8", ft8), ("FT4", ft4), ("PSK31", psk), ("RTTY", rtty), ("SSTV", sstv_test),
                      ("cty.dat", cty_test), ("carte", carte)):
         check(name, fn)
+
+    def flags():
+        from . import qsl
+        for call, want in (("F4JCF", "fr"), ("DL1ABC", "de"), ("GM3XYZ", "gb-sct"), ("EA8AA", "ic"), ("JA1A", "jp")):
+            iso, _n = qsl.country_of(call)
+            assert iso == want and qsl.flag_path(iso), (call, iso)
+        return f"{len(qsl.dxcc_table())} pays, drapeaux présents"
+    check("Drapeaux", flags)
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     return 0 if ok else 1

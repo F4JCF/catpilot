@@ -1,3 +1,7 @@
-Nouveautés de la 0.21.6 :
-- Extinction à la fermeture : si la liaison était perdue au moment de quitter, CAT Pilot rouvre le port et envoie quand même l'ordre d'extinction au poste (avant, il ne l'envoyait pas). L'ordre est aussi répété, après un réveil du processeur CAT.
-- Journal de la liaison CAT : il garde maintenant les échanges qui précèdent le tout premier silence du poste (pour trouver la commande qui le bloque), et note les tentatives d'allumage et d'extinction.
+Nouveautés de la 0.22.0 :
+- Carnet : le drapeau du pays s'affiche à côté de l'indicatif dès la saisie, avec le nom du pays en français. Le tableau du carnet a une colonne « Pays » avec drapeau.
+- Recherche d'indicatif sur QRZCQ.com (compte gratuit, dans Carnet > Réglages), en plus de HamQTH, QRZ.com et callook.info. Bouton « QRZCQ » pour ouvrir la fiche.
+- La fiche indique le manager QSL (« QSL via »), si l'indicatif utilise LoTW (avec la date de son dernier envoi) et s'il est membre eQSL AG.
+- Gestion des QSL eQSL et LoTW : CAT Pilot relève les confirmations reçues (boîte de réception eQSL, QSL LoTW) et les rapproche des QSO du carnet. Colonnes eQSL et LoTW dans le carnet : ✔ confirmé, ↑ envoyé en attente. Relevé automatique une fois par jour, ou « Confirmations eQSL / LoTW ». Pour LoTW, indiquez l'identifiant et le mot de passe du site lotw.arrl.org dans Carnet > Envoi en ligne.
+- Diplômes : les pays DXCC confirmés sont distingués des pays seulement contactés.
+- Drapeaux : flag-icons (licence MIT).

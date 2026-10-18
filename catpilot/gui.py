@@ -310,6 +310,11 @@ class MainWindow(QMainWindow):
         self.log.added.connect(self._auto_upload)
         self.uploader.progress.connect(lambda m: self.statusBar().showMessage(m, 8000))
         self.uploader.finished.connect(self._upload_done)
+        from .qsl import ConfirmSync
+        self.qsl_sync = ConfirmSync(self.log, self.settings)
+        self.qsl_sync.progress.connect(lambda m: self.statusBar().showMessage(m, 15000))
+        self.qsl_sync.finished.connect(lambda m: self.statusBar().showMessage("Confirmations : " + m, 20000))
+        QTimer.singleShot(45000, self.qsl_sync.auto)
         self._worked = set()
         self._entities = None
         self.log.changed.connect(self._reload_worked)
@@ -1273,9 +1278,10 @@ class MainWindow(QMainWindow):
                             ("Exporter un concours en Cabrillo…", lambda: self.logdock.export_cabrillo()),
                             ("Sauvegarde Nextcloud…", self.backup_dialog),
                             ("Envoi en ligne : QRZ.com, eQSL, Club Log, LoTW…", self.upload_dialog),
+                            ("Relever les confirmations eQSL et LoTW", self.qsl_sync_now),
                             ("Diplômes et statistiques…", self.awards_dialog),
                             (None, None),
-                            ("Réglages : indicatif, QRZ.com et HamQTH…", self.log_settings)):
+                            ("Réglages : indicatif, HamQTH, QRZCQ et QRZ.com…", self.log_settings)):
             if label is None:
                 cm.addSeparator()
                 continue
@@ -1746,6 +1752,15 @@ class MainWindow(QMainWindow):
         self.logdock.raise_()
         self.logdock.ed_call.setFocus()
 
+    def qsl_sync_now(self):
+        if not any(self.qsl_sync.configured().values()):
+            QMessageBox.information(self, "Confirmations", "Renseignez votre compte eQSL et/ou votre identifiant du "
+                                    "site LoTW dans Carnet > Envoi en ligne, puis recommencez.")
+            self.upload_dialog()
+            return
+        if not self.qsl_sync.run():
+            self.statusBar().showMessage("Relevé des confirmations déjà en cours…", 5000)
+
     def log_settings(self):
         d = HamQTHDialog(self)
         if d.exec() != QDialog.Accepted:
@@ -1762,6 +1777,11 @@ class MainWindow(QMainWindow):
         self.logdock.hamqth.qrz_user = d.ed_qrz_user.text().strip()
         self.logdock.hamqth.qrz_password = d.ed_qrz_pass.text()
         self.logdock.hamqth.qrz_session = None
+        s.setValue("qrzcq_user", d.ed_qrzcq_user.text().strip())
+        s.setValue("qrzcq_pass", d.ed_qrzcq_pass.text())
+        self.logdock.hamqth.qrzcq_user = d.ed_qrzcq_user.text().strip()
+        self.logdock.hamqth.qrzcq_password = d.ed_qrzcq_pass.text()
+        self.logdock.hamqth.qrzcq_session = None
         self.logdock.hamqth.cache.clear()
         self.cw.ed_mycall.setText(d.ed_call.text().strip().upper())
 

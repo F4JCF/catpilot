@@ -9,6 +9,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QDockWidget, QFileDialog, QFormLayout,
     QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox, QPushButton,
@@ -20,7 +21,10 @@ from . import __version__, adif
 FIELDS = ["call", "qso_date", "time_on", "freq", "band", "mode", "submode", "rst_sent", "rst_rcvd",
           "name", "qth", "gridsquare", "sig", "sig_info", "my_sig", "my_sig_info", "comment",
           "tx_pwr", "my_gridsquare", "station_callsign", "operator", "country",
-          "contest_id", "stx", "srx", "stx_string", "srx_string"]
+          "contest_id", "stx", "srx", "stx_string", "srx_string",
+          "qsl_via", "eqsl_qsl_rcvd", "eqsl_qslrdate", "lotw_qsl_rcvd", "lotw_qslrdate"]
+# Champs propres aux confirmations : jamais envoyés aux carnets en ligne
+QSL_FIELDS = ("eqsl_qsl_rcvd", "eqsl_qslrdate", "lotw_qsl_rcvd", "lotw_qslrdate")
 
 BAND_EDGES = [("2200m", 0.1357, 0.1378), ("630m", 0.472, 0.479), ("160m", 1.8, 2.0), ("80m", 3.5, 4.0),
               ("60m", 5.06, 5.45), ("40m", 7.0, 7.3), ("30m", 10.1, 10.15), ("20m", 14.0, 14.35),
@@ -140,12 +144,18 @@ class Log(QObject):
         return False
 
     def query(self, where="1", args=(), limit=None):
-        sql = f"SELECT id, {', '.join(FIELDS)} FROM qso WHERE {where} ORDER BY qso_date DESC, time_on DESC"
+        cols = FIELDS + list(UP_COLS)
+        sql = f"SELECT id, {', '.join(cols)} FROM qso WHERE {where} ORDER BY qso_date DESC, time_on DESC"
         if limit:
             sql += f" LIMIT {int(limit)}"
         with self.lock:
             rows = self.db.execute(sql, args).fetchall()
-        return [dict(zip(["id"] + FIELDS, r)) for r in rows]
+        return [dict(zip(["id"] + cols, r)) for r in rows]
+
+    def confirmed_counts(self):
+        with self.lock:
+            return {svc: self.db.execute(f"SELECT COUNT(*) FROM qso WHERE {svc}_qsl_rcvd = 'Y'").fetchone()[0]
+                    for svc in ("eqsl", "lotw")}
 
     def worked(self, call):
         """Bandes et modes déjà contactés avec cet indicatif."""
@@ -173,6 +183,7 @@ class HamQTH(QObject):
     URL = "https://www.hamqth.com/xml.php"
     NS = "{https://www.hamqth.com}"
     QRZ_URL = "https://xmldata.qrz.com/xml/current/"
+    QRZCQ_URL = "https://ssl.qrzcq.com/xml"
     KEYS = ("name", "qth", "country", "grid", "itu", "cq", "lat", "lon")
 
     def __init__(self):
@@ -181,6 +192,8 @@ class HamQTH(QObject):
         self.qrz_user = self.qrz_password = ""
         self.session = None
         self.qrz_session = None
+        self.qrzcq_user = self.qrzcq_password = ""
+        self.qrzcq_session = None
         self.cache = {}
 
     def lookup(self, call):
@@ -234,7 +247,8 @@ class HamQTH(QObject):
             qth = ", ".join(x for x in (f("addr2"), f("state")) if x)
             return {"name": (f("nickname") or f("fname")).split(" ")[0].title(),
                     "qth": qth, "country": f("country"), "grid": f("grid"), "itu": f("ituzone"),
-                    "cq": f("cqzone"), "lat": f("lat"), "lon": f("lon"), "src": "QRZ.com"}, None
+                    "cq": f("cqzone"), "lat": f("lat"), "lon": f("lon"), "qsl_via": f("qslmgr"),
+                    "lotw": f("lotw") == "1", "eqsl": f("eqsl") == "1", "src": "QRZ.com"}, None
         return None, None
 
     def _hamqth(self, call):
@@ -254,11 +268,42 @@ class HamQTH(QObject):
             if err:
                 return None, (None if "not found" in err.lower() else f"HamQTH : {err}")
             info = {k: self._text(root, k) for k in
-                    ("nick", "adr_name", "qth", "country", "grid", "itu", "cq", "lat", "lon")}
+                    ("nick", "adr_name", "qth", "country", "grid", "itu", "cq", "lat", "lon", "qsl_via")}
+            info["lotw"] = self._text(root, "lotw").upper() == "Y"
+            info["eqsl"] = self._text(root, "eqsl").upper() == "Y"
             info["name"] = info.pop("nick") or info.pop("adr_name", "").split(" ")[0]
             info.pop("adr_name", None)
             info["src"] = "HamQTH"
             return info, None
+        return None, None
+
+    def _qrzcq(self, call):
+        """QRZCQ.com (compte gratuit ; certaines fiches demandent l'abonnement « premium »)."""
+        if not self.qrzcq_user or not self.qrzcq_password:
+            return None, None
+        agent = f"CATPilot{__version__}"
+        for attempt in range(2):
+            if not self.qrzcq_session:
+                root = ET.fromstring(self._open(self.QRZCQ_URL + "?" + urllib.parse.urlencode(
+                    {"username": self.qrzcq_user, "password": self.qrzcq_password, "agent": agent})))
+                self.qrzcq_session = self._find(root, "Key") or None
+                if not self.qrzcq_session:
+                    return None, "QRZCQ : " + (self._find(root, "Error") or "connexion refusée")
+            root = ET.fromstring(self._open(self.QRZCQ_URL + "?" + urllib.parse.urlencode(
+                {"s": self.qrzcq_session, "callsign": call, "agent": agent})))
+            err = self._find(root, "Error")
+            if not self._find(root, "call"):
+                if err and ("session" in err.lower() or "key" in err.lower()) and attempt == 0:
+                    self.qrzcq_session = None
+                    continue
+                return None, (f"QRZCQ : {err}" if err and "not found" not in err.lower() else None)
+            f = lambda t: self._find(root, t)
+            name = f("name")
+            return {"name": name.split(" ")[0].title() if name else "",
+                    "qth": f("city") or f("qth"), "country": f("country"), "grid": f("locator"),
+                    "itu": f("itu"), "cq": f("cq"), "lat": f("latitude"), "lon": f("longitude"),
+                    "qsl_via": f("manager"), "lotw": f("lotw").upper() in ("1", "Y", "YES"),
+                    "eqsl": (f("eqsl") or f("eqsle")).upper() in ("1", "Y", "YES"), "src": "QRZCQ"}, None
         return None, None
 
     def _callook(self, call):
@@ -276,7 +321,7 @@ class HamQTH(QObject):
 
     def _lookup(self, call):
         info, errors, sources = {}, [], []
-        for fn in (self._qrz, self._hamqth, self._callook):
+        for fn in (self._qrz, self._hamqth, self._qrzcq, self._callook):
             try:
                 got, err = fn(call)
             except Exception as e:
@@ -299,8 +344,8 @@ class HamQTH(QObject):
             self.result.emit(call, " ; ".join(errors) or "Indicatif inconnu")
             return
         info["sources"] = ", ".join(s for s in sources if s) or "préfixe"
-        if not sources and not self.qrz_user and not self.user:
-            info["hint"] = "pour le nom et le QTH, ajoutez un compte QRZ.com ou HamQTH (Carnet > Réglages)"
+        if not sources and not self.qrz_user and not self.user and not self.qrzcq_user:
+            info["hint"] = "pour le nom et le QTH, ajoutez un compte HamQTH, QRZCQ ou QRZ.com (Carnet > Réglages)"
         if errors and not sources:
             info["hint"] = " ; ".join(errors)
         if sources:
@@ -445,12 +490,18 @@ class LogDock(QDockWidget):
         self.hamqth.password = s.value("hamqth_pass", "")
         self.hamqth.qrz_user = s.value("qrz_user", "")
         self.hamqth.qrz_password = s.value("qrz_pass", "")
+        self.hamqth.qrzcq_user = s.value("qrzcq_user", "")
+        self.hamqth.qrzcq_password = s.value("qrzcq_pass", "")
         self.hamqth.result.connect(self.on_lookup)
+        from .qsl import Members
+        self.members = Members()
+        self._qsl_via = ""
         self._lookup_timer = QTimer(self)
         self._lookup_timer.setSingleShot(True)
         self._lookup_timer.setInterval(900)
         self._lookup_timer.timeout.connect(self.auto_lookup)
         self._auto = {}                     # champ -> texte rempli automatiquement
+        self._country = ""
         self.t_start = None
 
         w = QWidget()
@@ -470,9 +521,18 @@ class LogDock(QDockWidget):
         self.ed_myref = QLineEdit(s.value("log_myref", ""))
         self.ed_myref.setPlaceholderText("votre référence en activation")
         self.ed_comment = QLineEdit()
+        self.lb_flag = QLabel()
+        self.lb_flag.setFixedSize(40, 30)
+        self.lb_flag.setAlignment(Qt.AlignCenter)
+        call_box = QWidget()
+        hc = QHBoxLayout(call_box)
+        hc.setContentsMargins(0, 0, 0, 0)
+        hc.setSpacing(6)
+        hc.addWidget(self.lb_flag)
+        hc.addWidget(self.ed_call, 1)
         self.lb_freq = QLabel("—")
         self.lb_freq.setObjectName("value")
-        rows = [("Indicatif", self.ed_call), ("Nom", self.ed_name), ("QTH", self.ed_qth),
+        rows = [("Indicatif", call_box), ("Nom", self.ed_name), ("QTH", self.ed_qth),
                 ("Locator", self.ed_grid), ("RST envoyé", self.ed_sent), ("RST reçu", self.ed_rcvd),
                 ("Mode", self.cb_mode), ("Fréquence", self.lb_freq),
                 ("Sa réf. POTA/SOTA", self.ed_ref), ("Ma réf. (activation)", self.ed_myref),
@@ -527,6 +587,10 @@ class LogDock(QDockWidget):
         b.setToolTip("Ouvrir la fiche de l'indicatif sur HamQTH.com")
         b.clicked.connect(lambda: self.open_web("https://www.hamqth.com/{}"))
         hi.addWidget(b)
+        b = QPushButton("QRZCQ")
+        b.setToolTip("Ouvrir la fiche de l'indicatif sur QRZCQ.com")
+        b.clicked.connect(lambda: self.open_web("https://www.qrzcq.com/call/{}"))
+        hi.addWidget(b)
         v.addLayout(hi)
         h = QHBoxLayout()
         b = QPushButton("Enregistrer le QSO")
@@ -548,10 +612,14 @@ class LogDock(QDockWidget):
         self.lb_count.setObjectName("hint")
         h.addWidget(self.lb_count)
         v.addLayout(h)
-        self.tbl = QTableWidget(0, 9)
-        self.tbl.setHorizontalHeaderLabels(["Date", "UTC", "Indicatif", "Bande", "Mode", "Env.", "Reçu",
-                                            "Nom", "Réf."])
+        self.tbl = QTableWidget(0, 12)
+        self.tbl.setHorizontalHeaderLabels(["Date", "UTC", "Indicatif", "Pays", "Bande", "Mode", "Env.", "Reçu",
+                                            "Nom", "eQSL", "LoTW", "Réf."])
+        self.tbl.horizontalHeaderItem(9).setToolTip("✔ confirmé · ↑ envoyé, en attente de confirmation")
+        self.tbl.horizontalHeaderItem(10).setToolTip("✔ confirmé · ↑ envoyé, en attente de confirmation")
         self.tbl.verticalHeader().setVisible(False)
+        from PySide6.QtCore import QSize
+        self.tbl.setIconSize(QSize(24, 18))
         self.tbl.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tbl.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
@@ -561,6 +629,7 @@ class LogDock(QDockWidget):
         for label, slot in (("Supprimer", self.delete_selected), ("Importer ADIF", self.import_adif),
                             ("Exporter ADIF", self.export_adif), ("Exporter une activation", self.export_activation),
                             ("Envoi en ligne…", lambda: self.win.upload_dialog()),
+                            ("Confirmations eQSL / LoTW", lambda: self.win.qsl_sync_now()),
                             ("Diplômes…", lambda: self.win.awards_dialog())):
             b = QPushButton(label)
             b.clicked.connect(slot)
@@ -601,6 +670,8 @@ class LogDock(QDockWidget):
             if ed.text() == val:
                 ed.clear()
         self._auto.clear()
+        self._qsl_via = ""
+        self.update_flag(txt.strip())
         prev = self.log.worked(txt.strip()) if len(txt.strip()) >= 3 else []
         dupe = self.contest_dupe(txt.strip())
         if dupe:
@@ -609,12 +680,26 @@ class LogDock(QDockWidget):
             self._lookup_timer.start()
             return
         self.lb_info.setStyleSheet("")
+        head = self._country + " — " if self._country and len(txt.strip()) >= 2 else ""
         if prev:
             bands = sorted({f"{r['band']} {r['mode']}" for r in prev})
-            self.lb_info.setText(f"Déjà contacté {len(prev)} fois : " + ", ".join(bands[:8]))
+            conf = sum(1 for r in prev if "Y" in ((r.get("eqsl_qsl_rcvd") or "") + (r.get("lotw_qsl_rcvd") or "")).upper())
+            self.lb_info.setText(head + f"Déjà contacté {len(prev)} fois : " + ", ".join(bands[:8])
+                                 + (f" ({conf} confirmé{'s' if conf > 1 else ''})" if conf else ""))
         else:
-            self.lb_info.setText("Nouvel indicatif" if len(txt.strip()) >= 3 else "")
+            self.lb_info.setText(head + ("Nouvel indicatif" if len(txt.strip()) >= 3 else ""))
         self._lookup_timer.start()
+
+    def update_flag(self, call):
+        from .qsl import country_of, flag_pixmap
+        iso, name = country_of(call) if len(call) >= 1 else (None, "")
+        self._country = name
+        pm = flag_pixmap(iso) if iso else None
+        if pm:
+            self.lb_flag.setPixmap(pm.scaled(40, 30, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        else:
+            self.lb_flag.clear()
+        self.lb_flag.setToolTip(name)
 
     # --- concours ----------------------------------------------------------------------------
     def _contest_toggled(self, on):
@@ -668,7 +753,7 @@ class LogDock(QDockWidget):
             if info.get(key) and (not ed.text() or ed.text() == self._auto.get(ed)):
                 ed.setText(info[key])
                 self._auto[ed] = info[key]
-        extra = " — ".join(x for x in (info.get("qth"), info.get("country")) if x)
+        extra = " — ".join(x for x in (info.get("qth"), self._country or info.get("country")) if x)
         zones = " ".join(x for x in ((f"CQ {info['cq']}" if info.get("cq") else ""),
                                      (f"ITU {info['itu']}" if info.get("itu") else "")) if x)
         if zones:
@@ -682,6 +767,20 @@ class LogDock(QDockWidget):
             except ValueError:
                 pass
         txt = f"{call} : {extra}" if extra else f"{call} trouvé"
+        qsl = []
+        if info.get("qsl_via"):
+            self._qsl_via = info["qsl_via"].upper()
+            qsl.append(f"QSL via {self._qsl_via}")
+        mem = self.members.describe(call)
+        if mem:
+            qsl.append(mem)
+        else:
+            if info.get("lotw"):
+                qsl.append("LoTW ✓")
+            if info.get("eqsl"):
+                qsl.append("eQSL ✓")
+        if qsl:
+            txt += "\n" + " · ".join(qsl)
         if info.get("sources"):
             txt += f"  [{info['sources']}]"
         if info.get("hint"):
@@ -710,6 +809,8 @@ class LogDock(QDockWidget):
         for ed in (self.ed_call, self.ed_name, self.ed_qth, self.ed_grid, self.ed_ref, self.ed_comment):
             ed.clear()
         self.lb_info.clear()
+        self.lb_flag.clear()
+        self._country = self._qsl_via = ""
         self.t_start = None
         self.on_mode(self.cb_mode.currentText())
         self.ed_call.setFocus()
@@ -729,7 +830,7 @@ class LogDock(QDockWidget):
                "freq": f"{st.freq / 1e6:.6f}" if st and st.freq else "", "mode": mode, "submode": sub,
                "rst_sent": self.ed_sent.text(), "rst_rcvd": self.ed_rcvd.text(),
                "name": self.ed_name.text(), "qth": self.ed_qth.text(), "gridsquare": self.ed_grid.text(),
-               "comment": self.ed_comment.text(),
+               "comment": self.ed_comment.text(), "qsl_via": self._qsl_via, "country": self._country,
                "tx_pwr": str(st.p.get("pwr", "")) if st else "",
                "station_callsign": self.win.settings.value("mycall", "").upper(),
                "my_gridsquare": self.win.b_loc.text().split()[0] if getattr(self.win, "station", None) else ""}
@@ -750,18 +851,36 @@ class LogDock(QDockWidget):
 
     # --- tableau -----------------------------------------------------------------------------
     def refresh(self):
+        from .qsl import country_of, flag_icon
         q = self.ed_search.text().strip().upper()
         rows = self.log.query("call LIKE ?", (f"%{q}%",), limit=500) if q else self.log.query(limit=300)
         self.rows = rows
         self.tbl.setRowCount(len(rows))
         for i, r in enumerate(rows):
             d = r["qso_date"] or ""
+            iso, country = country_of(r["call"])
             vals = [f"{d[6:8]}/{d[4:6]}/{d[:4]}" if len(d) == 8 else d, (r["time_on"] or "")[:4],
-                    r["call"], r["band"], r["submode"] or r["mode"], r["rst_sent"], r["rst_rcvd"],
-                    r["name"], r["sig_info"] or r["my_sig_info"]]
+                    r["call"], country, r["band"], r["submode"] or r["mode"], r["rst_sent"], r["rst_rcvd"],
+                    r["name"], "", "", r["sig_info"] or r["my_sig_info"]]
             for c, val in enumerate(vals):
                 self.tbl.setItem(i, c, QTableWidgetItem(val or ""))
-        self.lb_count.setText(f"{self.log.count()} QSO")
+            ic = flag_icon(iso)
+            if ic:
+                self.tbl.item(i, 3).setIcon(ic)
+            for c, svc in ((9, "eqsl"), (10, "lotw")):
+                it = self.tbl.item(i, c)
+                it.setTextAlignment(Qt.AlignCenter)
+                rd = r.get(f"{svc}_qslrdate") or ""
+                if (r.get(f"{svc}_qsl_rcvd") or "").upper() == "Y":
+                    it.setText("✔")
+                    it.setForeground(QColor("#4caf50"))
+                    it.setToolTip("Confirmé" + (f" le {rd[6:8]}/{rd[4:6]}/{rd[:4]}" if len(rd) == 8 else ""))
+                elif (r.get(f"up_{svc}") or "") not in ("", "ancien", "import"):
+                    it.setText("↑")
+                    it.setForeground(QColor("#9e9e9e"))
+                    it.setToolTip("Envoyé, pas encore confirmé")
+        cc = self.log.confirmed_counts()
+        self.lb_count.setText(f"{self.log.count()} QSO · confirmés : eQSL {cc['eqsl']}, LoTW {cc['lotw']}")
 
     def delete_selected(self):
         rows = sorted({i.row() for i in self.tbl.selectedIndexes()})
@@ -891,7 +1010,13 @@ class HamQTHDialog(QDialog):
         f.addRow("Mot de passe QRZ.com", self.ed_qrz_pass)
         f.addRow("Compte HamQTH", self.ed_user)
         f.addRow("Mot de passe HamQTH", self.ed_pass)
-        t = QLabel("Les deux comptes sont facultatifs. HamQTH.com est gratuit et donne nom, QTH et locator. "
+        self.ed_qrzcq_user = QLineEdit(s.value("qrzcq_user", ""))
+        self.ed_qrzcq_pass = QLineEdit(s.value("qrzcq_pass", ""))
+        self.ed_qrzcq_pass.setEchoMode(QLineEdit.Password)
+        f.addRow("Compte QRZCQ (indicatif)", self.ed_qrzcq_user)
+        f.addRow("Mot de passe QRZCQ", self.ed_qrzcq_pass)
+        t = QLabel("Tous les comptes sont facultatifs. HamQTH.com et QRZCQ.com sont gratuits et donnent nom, QTH, "
+                   "locator et manager QSL (QRZCQ peut réserver certaines fiches à ses abonnés). "
                    "QRZ.com donne la fiche complète avec un abonnement XML, et seulement une partie sans. "
                    "Sans compte, CAT Pilot trouve quand même le pays et les zones, et les indicatifs "
                    "américains via callook.info. Les mots de passe sont enregistrés sur ce PC.")

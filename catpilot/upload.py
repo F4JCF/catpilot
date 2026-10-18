@@ -97,7 +97,8 @@ class Uploader(QObject):
             self.log.changed.emit()
 
     def _rec(self, r):
-        return {k: r.get(k) for k in self.log.fields if r.get(k)}
+        from .logbook import QSL_FIELDS
+        return {k: r.get(k) for k in self.log.fields if r.get(k) and k not in QSL_FIELDS}
 
     # --- services ------------------------------------------------------------------------
     def _qrz(self, r):
