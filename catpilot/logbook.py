@@ -121,6 +121,16 @@ class Log(QObject):
             return {c[3:]: self.db.execute(f"SELECT COUNT(*) FROM qso WHERE {c} IS NULL OR {c} = ''").fetchone()[0]
                     for c in UP_COLS}
 
+    def update(self, qid, rec):
+        rec = {k: (str(v).strip() if v is not None else "") for k, v in rec.items() if k in FIELDS}
+        if not rec:
+            return
+        with self.lock:
+            self.db.execute(f"UPDATE qso SET {', '.join(k + ' = ?' for k in rec)} WHERE id = ?",
+                            list(rec.values()) + [qid])
+            self.db.commit()
+        self.changed.emit()
+
     def delete(self, qid):
         with self.lock:
             self.db.execute("DELETE FROM qso WHERE id = ?", (qid,))
@@ -245,7 +255,7 @@ class HamQTH(QObject):
                 return None, (f"QRZ.com : {err}" if err and "not found" not in err.lower() else None)
             f = lambda t: self._find(root, t)
             qth = ", ".join(x for x in (f("addr2"), f("state")) if x)
-            return {"name": (f("nickname") or f("fname")).split(" ")[0].title(),
+            return {"name": full_name(" ".join(x for x in (f("fname"), f("name")) if x)) or f("nickname"),
                     "qth": qth, "country": f("country"), "grid": f("grid"), "itu": f("ituzone"),
                     "cq": f("cqzone"), "lat": f("lat"), "lon": f("lon"), "qsl_via": f("qslmgr"),
                     "lotw": f("lotw") == "1", "eqsl": f("eqsl") == "1", "src": "QRZ.com"}, None
@@ -271,8 +281,9 @@ class HamQTH(QObject):
                     ("nick", "adr_name", "qth", "country", "grid", "itu", "cq", "lat", "lon", "qsl_via")}
             info["lotw"] = self._text(root, "lotw").upper() == "Y"
             info["eqsl"] = self._text(root, "eqsl").upper() == "Y"
-            info["name"] = info.pop("nick") or info.pop("adr_name", "").split(" ")[0]
-            info.pop("adr_name", None)
+            full = full_name(info.pop("adr_name", ""))
+            nick = info.pop("nick", "")
+            info["name"] = full if full and (not nick or nick.split(" ")[0].lower() in full.lower()) else (nick or full)
             info["src"] = "HamQTH"
             return info, None
         return None, None
@@ -299,7 +310,7 @@ class HamQTH(QObject):
                 return None, (f"QRZCQ : {err}" if err and "not found" not in err.lower() else None)
             f = lambda t: self._find(root, t)
             name = f("name")
-            return {"name": name.split(" ")[0].title() if name else "",
+            return {"name": full_name(name),
                     "qth": f("city") or f("qth"), "country": f("country"), "grid": f("locator"),
                     "itu": f("itu"), "cq": f("cq"), "lat": f("latitude"), "lon": f("longitude"),
                     "qsl_via": f("manager"), "lotw": f("lotw").upper() in ("1", "Y", "YES"),
@@ -315,7 +326,7 @@ class HamQTH(QObject):
             return None, None
         loc, adr = d.get("location") or {}, d.get("address") or {}
         name = (d.get("name") or "").title()
-        return {"name": name.split(" ")[0] if name else "", "qth": (adr.get("line2") or "").title(),
+        return {"name": name, "qth": (adr.get("line2") or "").title(),
                 "country": "États-Unis", "grid": loc.get("gridsquare", ""),
                 "lat": loc.get("latitude", ""), "lon": loc.get("longitude", ""), "src": "callook.info"}, None
 
@@ -335,6 +346,14 @@ class HamQTH(QObject):
                         info[k] = v
             if all(info.get(k) for k in ("name", "qth", "grid")):
                 break
+        if not info.get("grid") and info.get("lat") and info.get("lon"):
+            try:
+                from .geo import to_locator
+                lat, lon = float(info["lat"]), float(info["lon"])
+                if lat or lon:
+                    info["grid"] = to_locator(lat, lon)
+            except ValueError:
+                pass
         pre = prefix_info(call)
         if pre:
             for k in ("country", "cq", "itu"):
@@ -351,6 +370,34 @@ class HamQTH(QObject):
         if sources:
             self.cache[call] = info
         self.result.emit(call, info)
+
+
+def full_name(name):
+    """« MARC DUPONT » ou « marc dupont » -> « Marc Dupont » ; un nom déjà écrit proprement est gardé."""
+    name = " ".join((name or "").split())
+    if name and (name.isupper() or name.islower()):
+        name = " ".join(w.capitalize() if "-" not in w else "-".join(x.capitalize() for x in w.split("-"))
+                        for w in name.split(" "))
+    return name
+
+
+ACTIVITIES = ["", "POTA", "SOTA", "WWFF", "BOTA", "IOTA", "LLOTA", "DFCF", "DMF", "Autre"]
+ACTIVITY_HINT = {"POTA": "ex. FR-0123", "SOTA": "ex. F/AM-123", "WWFF": "ex. FFF-0123", "BOTA": "ex. B/F-0123",
+                 "IOTA": "ex. EU-005", "LLOTA": "ex. FR-0001", "DFCF": "ex. 06-001", "DMF": "ex. 06-001",
+                 "Autre": "référence"}
+
+
+def guess_activity(ref):
+    r = (ref or "").upper()
+    if re.match(r"^[A-Z0-9]{1,3}/[A-Z]{2}-\d+$", r):
+        return "SOTA"
+    if re.match(r"^B/", r):
+        return "BOTA"
+    if re.match(r"^[A-Z0-9]{1,2}FF-\d+$", r):
+        return "WWFF"
+    if re.match(r"^(AF|AN|AS|EU|NA|OC|SA)-\d{3}$", r):
+        return "IOTA"
+    return "POTA" if r else ""
 
 
 # Préfixe -> (pays, zone CQ, zone ITU). Les plus longs sont testés en premier.
@@ -517,9 +564,15 @@ class LogDock(QDockWidget):
         self.cb_mode.addItems(adif.LOG_MODES)
         self.cb_mode.currentTextChanged.connect(self.on_mode)
         self.ed_ref = QLineEdit()
-        self.ed_ref.setPlaceholderText("ex. FR-0123 ou F/AM-123")
         self.ed_myref = QLineEdit(s.value("log_myref", ""))
-        self.ed_myref.setPlaceholderText("votre référence en activation")
+        self.cb_sig, self.cb_mysig = QComboBox(), QComboBox()
+        for cb in (self.cb_sig, self.cb_mysig):
+            cb.addItems(ACTIVITIES)
+            cb.setItemText(0, "Aucune")
+        self.cb_mysig.setCurrentText(s.value("log_mysig", "") or guess_activity(self.ed_myref.text()) or "Aucune")
+        for cb, ed, who in ((self.cb_sig, self.ed_ref, "sa"), (self.cb_mysig, self.ed_myref, "votre")):
+            cb.currentTextChanged.connect(lambda t, e=ed, w=who: self._sig_changed(t, e, w))
+            self._sig_changed(cb.currentText(), ed, who)
         self.ed_comment = QLineEdit()
         self.lb_flag = QLabel()
         self.lb_flag.setFixedSize(40, 30)
@@ -532,13 +585,34 @@ class LogDock(QDockWidget):
         hc.addWidget(self.ed_call, 1)
         self.lb_freq = QLabel("—")
         self.lb_freq.setObjectName("value")
+        rst_box = QWidget()
+        hr = QHBoxLayout(rst_box)
+        hr.setContentsMargins(0, 0, 0, 0)
+        for ed in (self.ed_sent, self.ed_rcvd):
+            ed.setMaximumWidth(70)
+        hr.addWidget(QLabel("envoyé"))
+        hr.addWidget(self.ed_sent)
+        hr.addSpacing(12)
+        hr.addWidget(QLabel("reçu"))
+        hr.addWidget(self.ed_rcvd)
+        hr.addStretch()
+
+        def stack(cb, ed):
+            box = QWidget()
+            vb = QVBoxLayout(box)
+            vb.setContentsMargins(0, 0, 0, 0)
+            vb.setSpacing(3)
+            vb.addWidget(cb)
+            vb.addWidget(ed)
+            return box
+        self.ed_name.setPlaceholderText("prénom et nom")
         rows = [("Indicatif", call_box), ("Nom", self.ed_name), ("QTH", self.ed_qth),
-                ("Locator", self.ed_grid), ("RST envoyé", self.ed_sent), ("RST reçu", self.ed_rcvd),
-                ("Mode", self.cb_mode), ("Fréquence", self.lb_freq),
-                ("Sa réf. POTA/SOTA", self.ed_ref), ("Ma réf. (activation)", self.ed_myref),
-                ("Commentaire", self.ed_comment)]
+                ("Locator", self.ed_grid), ("RST", rst_box), ("Mode", self.cb_mode),
+                ("Fréquence", self.lb_freq), ("Commentaire", self.ed_comment),
+                ("Son activité", stack(self.cb_sig, self.ed_ref)),
+                ("Mon activité", stack(self.cb_mysig, self.ed_myref))]
         for i, (label, wd) in enumerate(rows):
-            g.addWidget(QLabel(label), i // 2, (i % 2) * 2)
+            g.addWidget(QLabel(label), i // 2, (i % 2) * 2, Qt.AlignLeft | Qt.AlignVCenter)
             g.addWidget(wd, i // 2, (i % 2) * 2 + 1)
         v.addLayout(g)
         # --- concours ---
@@ -612,11 +686,13 @@ class LogDock(QDockWidget):
         self.lb_count.setObjectName("hint")
         h.addWidget(self.lb_count)
         v.addLayout(h)
-        self.tbl = QTableWidget(0, 12)
-        self.tbl.setHorizontalHeaderLabels(["Date", "UTC", "Indicatif", "Pays", "Bande", "Mode", "Env.", "Reçu",
-                                            "Nom", "eQSL", "LoTW", "Réf."])
-        self.tbl.horizontalHeaderItem(9).setToolTip("✔ confirmé · ↑ envoyé, en attente de confirmation")
+        self.tbl = QTableWidget(0, 13)
+        self.tbl.setHorizontalHeaderLabels(["Date", "UTC", "Indicatif", "Pays", "Fréquence", "Bande", "Mode", "Env.",
+                                            "Reçu", "Nom", "eQSL", "LoTW", "Réf."])
         self.tbl.horizontalHeaderItem(10).setToolTip("✔ confirmé · ↑ envoyé, en attente de confirmation")
+        self.tbl.horizontalHeaderItem(11).setToolTip("✔ confirmé · ↑ envoyé, en attente de confirmation")
+        self.tbl.setToolTip("Double-clic sur un QSO pour le modifier ou le supprimer")
+        self.tbl.cellDoubleClicked.connect(self.edit_row)
         self.tbl.verticalHeader().setVisible(False)
         from PySide6.QtCore import QSize
         self.tbl.setIconSize(QSize(24, 18))
@@ -689,6 +765,12 @@ class LogDock(QDockWidget):
         else:
             self.lb_info.setText(head + ("Nouvel indicatif" if len(txt.strip()) >= 3 else ""))
         self._lookup_timer.start()
+
+    def _sig_changed(self, text, ed, who):
+        on = text not in ("", "Aucune")
+        ed.setEnabled(on)
+        ed.setPlaceholderText(f"{who} référence {text} : {ACTIVITY_HINT.get(text, '')}".replace(" : ex.", ", ex.")
+                              if on else "choisissez d'abord l'activité")
 
     def update_flag(self, call):
         from .qsl import country_of, flag_pixmap
@@ -799,6 +881,7 @@ class LogDock(QDockWidget):
         self.ed_call.setText(call.upper())
         self.on_call_edit(call)
         if ref:
+            self.cb_sig.setCurrentText(guess_activity(ref))
             self.ed_ref.setText(ref)
         if mode:
             self.cb_mode.setCurrentText(mode)
@@ -808,6 +891,7 @@ class LogDock(QDockWidget):
         self._lookup_timer.stop()
         for ed in (self.ed_call, self.ed_name, self.ed_qth, self.ed_grid, self.ed_ref, self.ed_comment):
             ed.clear()
+        self.cb_sig.setCurrentIndex(0)
         self.lb_info.clear()
         self.lb_flag.clear()
         self._country = self._qsl_via = ""
@@ -825,7 +909,7 @@ class LogDock(QDockWidget):
         st = self._last
         mode, sub = adif.ADIF_MODES.get(self.cb_mode.currentText(), (self.cb_mode.currentText(), ""))
         ref, myref = self.ed_ref.text().strip().upper(), self.ed_myref.text().strip().upper()
-        kind = lambda r: "SOTA" if "/" in r else "POTA"
+        sig = lambda cb, r: (cb.currentText() if cb.currentIndex() > 0 else guess_activity(r)).upper()
         rec = {"call": call, "qso_date": t.strftime("%Y%m%d"), "time_on": t.strftime("%H%M%S"),
                "freq": f"{st.freq / 1e6:.6f}" if st and st.freq else "", "mode": mode, "submode": sub,
                "rst_sent": self.ed_sent.text(), "rst_rcvd": self.ed_rcvd.text(),
@@ -834,10 +918,10 @@ class LogDock(QDockWidget):
                "tx_pwr": str(st.p.get("pwr", "")) if st else "",
                "station_callsign": self.win.settings.value("mycall", "").upper(),
                "my_gridsquare": self.win.b_loc.text().split()[0] if getattr(self.win, "station", None) else ""}
-        if ref:
-            rec["sig"], rec["sig_info"] = kind(ref), ref
-        if myref:
-            rec["my_sig"], rec["my_sig_info"] = kind(myref), myref
+        if ref and self.cb_sig.currentIndex() > 0:
+            rec["sig"], rec["sig_info"] = sig(self.cb_sig, ref), ref
+        if myref and self.cb_mysig.currentIndex() > 0:
+            rec["my_sig"], rec["my_sig_info"] = sig(self.cb_mysig, myref), myref
         if self.contest_on():
             rcvd = self.ed_xrcvd.text().strip().upper()
             rec.update({"contest_id": self.ed_contest.text().strip().upper(), "stx": str(self.sp_serial.value()),
@@ -859,15 +943,23 @@ class LogDock(QDockWidget):
         for i, r in enumerate(rows):
             d = r["qso_date"] or ""
             iso, country = country_of(r["call"])
+            try:
+                fq = f"{float(r['freq']):.4f}".replace(".", ",") if r["freq"] else ""
+            except ValueError:
+                fq = r["freq"]
+            ref = " ".join(x for x in ((r["sig"] or "") + " " + (r["sig_info"] or ""),
+                                       ("moi : " + (r["my_sig"] or "") + " " + r["my_sig_info"]) if r["my_sig_info"] else "")
+                           if x.strip())
             vals = [f"{d[6:8]}/{d[4:6]}/{d[:4]}" if len(d) == 8 else d, (r["time_on"] or "")[:4],
-                    r["call"], country, r["band"], r["submode"] or r["mode"], r["rst_sent"], r["rst_rcvd"],
-                    r["name"], "", "", r["sig_info"] or r["my_sig_info"]]
+                    r["call"], country, fq, r["band"], r["submode"] or r["mode"], r["rst_sent"], r["rst_rcvd"],
+                    r["name"], "", "", ref.strip()]
             for c, val in enumerate(vals):
                 self.tbl.setItem(i, c, QTableWidgetItem(val or ""))
             ic = flag_icon(iso)
             if ic:
                 self.tbl.item(i, 3).setIcon(ic)
-            for c, svc in ((9, "eqsl"), (10, "lotw")):
+            self.tbl.item(i, 4).setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            for c, svc in ((10, "eqsl"), (11, "lotw")):
                 it = self.tbl.item(i, c)
                 it.setTextAlignment(Qt.AlignCenter)
                 rd = r.get(f"{svc}_qslrdate") or ""
@@ -881,6 +973,10 @@ class LogDock(QDockWidget):
                     it.setToolTip("Envoyé, pas encore confirmé")
         cc = self.log.confirmed_counts()
         self.lb_count.setText(f"{self.log.count()} QSO · confirmés : eQSL {cc['eqsl']}, LoTW {cc['lotw']}")
+
+    def edit_row(self, row, _col=0):
+        if 0 <= row < len(self.rows):
+            QsoEditDialog(self, self.rows[row]).exec()
 
     def delete_selected(self):
         rows = sorted({i.row() for i in self.tbl.selectedIndexes()})
@@ -933,7 +1029,8 @@ class LogDock(QDockWidget):
         """Export au format attendu par POTA/SOTA : une référence, une date."""
         myref = self.ed_myref.text().strip().upper()
         if not myref:
-            QMessageBox.information(self, "Activation", "Indiquez votre référence dans « Ma réf. (activation) ».")
+            QMessageBox.information(self, "Activation", "Choisissez votre activité et indiquez votre référence "
+                                    "dans « Mon activité ».")
             return
         today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d")
         rows = self.log.query("my_sig_info = ? AND qso_date = ?", (myref, today))
@@ -945,6 +1042,7 @@ class LogDock(QDockWidget):
 
     def save_settings(self, s):
         s.setValue("log_myref", self.ed_myref.text())
+        s.setValue("log_mysig", self.cb_mysig.currentText() if self.cb_mysig.currentIndex() > 0 else "")
         s.setValue("contest_on", self.ck_contest.isChecked())
         s.setValue("contest_id", self.ed_contest.text())
         s.setValue("contest_serial", self.sp_serial.value())
@@ -1027,3 +1125,114 @@ class HamQTHDialog(QDialog):
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
         f.addRow(bb)
+
+
+class QsoEditDialog(QDialog):
+    """Modification (ou suppression) d'un QSO du carnet."""
+
+    def __init__(self, dock, rec):
+        super().__init__(dock)
+        self.dock, self.log, self.rec = dock, dock.log, rec
+        self.setWindowTitle(f"QSO avec {rec['call']}")
+        self.resize(560, 0)
+        v = QVBoxLayout(self)
+        f = QFormLayout()
+        d, t = rec.get("qso_date") or "", (rec.get("time_on") or "") + "000000"
+        self.ed = {}
+
+        def line(key, label, value, hint=""):
+            e = QLineEdit(value or "")
+            if hint:
+                e.setPlaceholderText(hint)
+            f.addRow(label, e)
+            self.ed[key] = e
+            return e
+        line("call", "Indicatif", rec.get("call"))
+        line("date", "Date (UTC)", f"{d[6:8]}/{d[4:6]}/{d[:4]}" if len(d) == 8 else d, "jj/mm/aaaa")
+        line("time", "Heure (UTC)", f"{t[:2]}:{t[2:4]}", "hh:mm")
+        try:
+            fq = f"{float(rec['freq']):.6f}".rstrip("0").rstrip(".") if rec.get("freq") else ""
+        except ValueError:
+            fq = rec.get("freq") or ""
+        line("freq", "Fréquence (MHz)", fq.replace(".", ","), "ex. 7,127")
+        self.cb_mode = QComboBox()
+        self.cb_mode.setEditable(True)
+        self.cb_mode.addItems(adif.LOG_MODES)
+        self.cb_mode.setCurrentText(rec.get("submode") or rec.get("mode") or "")
+        f.addRow("Mode", self.cb_mode)
+        line("rst_sent", "RST envoyé", rec.get("rst_sent"))
+        line("rst_rcvd", "RST reçu", rec.get("rst_rcvd"))
+        line("name", "Nom", rec.get("name"), "prénom et nom")
+        line("qth", "QTH", rec.get("qth"))
+        line("gridsquare", "Locator", rec.get("gridsquare"))
+        self.cb_sig, self.cb_mysig = QComboBox(), QComboBox()
+        for cb, key in ((self.cb_sig, "sig"), (self.cb_mysig, "my_sig")):
+            cb.setEditable(True)
+            cb.addItems(ACTIVITIES)
+            cb.setCurrentText((rec.get(key) or "").upper())
+        f.addRow("Son activité", self.cb_sig)
+        line("sig_info", "Sa référence", rec.get("sig_info"))
+        f.addRow("Mon activité", self.cb_mysig)
+        line("my_sig_info", "Ma référence", rec.get("my_sig_info"))
+        line("qsl_via", "QSL via", rec.get("qsl_via"))
+        line("comment", "Commentaire", rec.get("comment"))
+        v.addLayout(f)
+        self.lb = QLabel("")
+        self.lb.setObjectName("hint")
+        self.lb.setWordWrap(True)
+        v.addWidget(self.lb)
+        h = QHBoxLayout()
+        b = QPushButton("Supprimer ce QSO")
+        b.clicked.connect(self.remove)
+        h.addWidget(b)
+        h.addStretch()
+        b = QPushButton("Annuler")
+        b.clicked.connect(self.reject)
+        h.addWidget(b)
+        b = QPushButton("Enregistrer")
+        b.setDefault(True)
+        b.clicked.connect(self.save)
+        h.addWidget(b)
+        v.addLayout(h)
+
+    def save(self):
+        g = lambda k: self.ed[k].text().strip()
+        try:
+            dt = datetime.datetime.strptime(g("date") + " " + g("time"), "%d/%m/%Y %H:%M")
+        except ValueError:
+            self.lb.setText("Date ou heure invalide : jj/mm/aaaa et hh:mm")
+            return
+        call = g("call").upper()
+        if not call:
+            self.lb.setText("Indicatif manquant")
+            return
+        freq = g("freq").replace(",", ".")
+        if freq:
+            try:
+                freq = f"{float(freq):.6f}"
+            except ValueError:
+                self.lb.setText("Fréquence invalide")
+                return
+        mode, sub = adif.ADIF_MODES.get(self.cb_mode.currentText(), (self.cb_mode.currentText().upper(), ""))
+        sec = (self.rec.get("time_on") or "000000")[4:6] if dt.strftime("%H%M") == (self.rec.get("time_on") or "")[:4] else "00"
+        rec = {"call": call, "qso_date": dt.strftime("%Y%m%d"), "time_on": dt.strftime("%H%M") + (sec or "00"),
+               "freq": freq, "band": band_of_mhz(freq) if freq else self.rec.get("band", ""),
+               "mode": mode, "submode": sub,
+               "sig": self.cb_sig.currentText().strip().upper() if g("sig_info") else "",
+               "my_sig": self.cb_mysig.currentText().strip().upper() if g("my_sig_info") else ""}
+        for k in ("rst_sent", "rst_rcvd", "name", "qth", "gridsquare", "sig_info", "my_sig_info", "qsl_via", "comment"):
+            rec[k] = g(k).upper() if k in ("gridsquare", "sig_info", "my_sig_info", "qsl_via") and k != "gridsquare" else g(k)
+        if rec["gridsquare"]:
+            gs = rec["gridsquare"]
+            rec["gridsquare"] = gs[:2].upper() + gs[2:4] + gs[4:].lower()
+        from .qsl import country_of
+        rec["country"] = country_of(call)[1]
+        self.log.update(self.rec["id"], rec)
+        self.dock.win.statusBar().showMessage(f"QSO avec {call} modifié")
+        self.accept()
+
+    def remove(self):
+        if QMessageBox.question(self, "Supprimer", f"Supprimer le QSO avec {self.rec['call']} du carnet ?") \
+                == QMessageBox.Yes:
+            self.log.delete(self.rec["id"])
+            self.accept()

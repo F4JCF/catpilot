@@ -1,7 +1,6 @@
-Nouveautés de la 0.22.0 :
-- Carnet : le drapeau du pays s'affiche à côté de l'indicatif dès la saisie, avec le nom du pays en français. Le tableau du carnet a une colonne « Pays » avec drapeau.
-- Recherche d'indicatif sur QRZCQ.com (compte gratuit, dans Carnet > Réglages), en plus de HamQTH, QRZ.com et callook.info. Bouton « QRZCQ » pour ouvrir la fiche.
-- La fiche indique le manager QSL (« QSL via »), si l'indicatif utilise LoTW (avec la date de son dernier envoi) et s'il est membre eQSL AG.
-- Gestion des QSL eQSL et LoTW : CAT Pilot relève les confirmations reçues (boîte de réception eQSL, QSL LoTW) et les rapproche des QSO du carnet. Colonnes eQSL et LoTW dans le carnet : ✔ confirmé, ↑ envoyé en attente. Relevé automatique une fois par jour, ou « Confirmations eQSL / LoTW ». Pour LoTW, indiquez l'identifiant et le mot de passe du site lotw.arrl.org dans Carnet > Envoi en ligne.
-- Diplômes : les pays DXCC confirmés sont distingués des pays seulement contactés.
-- Drapeaux : flag-icons (licence MIT).
+Nouveautés de la 0.22.1 (carnet) :
+- RST envoyé et reçu réunis sur une seule ligne.
+- Activités : menu déroulant (POTA, SOTA, WWFF, BOTA, IOTA, LLOTA, DFCF, DMF, Autre) avec la case de la référence juste en dessous, pour votre activation (« Mon activité », mémorisée) et pour celle du correspondant (« Son activité »).
+- Recherche d'indicatif : le prénom et le nom complets sont repris, et le locator est calculé à partir de la position quand la fiche n'en donne pas.
+- Double-clic sur un QSO de la liste : fenêtre pour le modifier (indicatif, date, heure, fréquence, mode, RST, nom, QTH, locator, activités, QSL via, commentaire) ou le supprimer.
+- La liste des QSO affiche la fréquence.
