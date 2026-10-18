@@ -30,6 +30,16 @@ jobs:
           python -c "import ctypes; ctypes.CDLL(r'catpilot/ft8lib.dll'); print('ft8lib OK')" 2>&1 | sed 's/^/::notice::/'
           python -c "import ctypes; ctypes.CDLL(r'catpilot/ft8lib.dll')" || { echo "::error::ft8lib.dll ne se charge pas"; exit 1; }
       - run: pyinstaller --noconfirm --onefile --windowed --name CATPilot --icon assets/catpilot.ico --add-data "assets;assets" --add-binary "catpilot/ft8lib.dll;." --collect-all pyrtlsdrlib --collect-all sstv run.py
+      - name: Auto-test de l'exécutable (FT8, FT4, PSK31, RTTY, SSTV)
+        shell: bash
+        run: |
+          ./dist/CATPilot.exe --selftest selftest.txt &
+          pid=$!
+          for i in $(seq 1 90); do [ -f selftest.txt ] && break; sleep 1; done
+          sleep 2
+          if [ ! -f selftest.txt ]; then echo "::error::l'auto-test n'a rien produit"; exit 1; fi
+          sed 's/^/::notice::/' selftest.txt | grep -v "^::notice::\s" | head -20
+          if grep -q "ÉCHEC" selftest.txt; then grep -A3 "ÉCHEC" selftest.txt | sed 's/^/::error::/'; exit 1; fi
       - name: Version
         id: ver
         shell: bash
