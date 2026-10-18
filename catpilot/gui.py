@@ -490,7 +490,7 @@ class MainWindow(QMainWindow):
         ml = QVBoxLayout(pm.body)
         mh = QHBoxLayout()
         self.meter_s = AnalogMeter("S-mètre", S_SCALE, 130 / 255)
-        self.meter_swr = AnalogMeter("ROS", SWR_SCALE, 89 / 255)
+        self.meter_swr = AnalogMeter("SWR", SWR_SCALE, 89 / 255)
         mh.addWidget(self.meter_s)
         mh.addWidget(self.meter_swr)
         ml.addLayout(mh)
@@ -736,17 +736,6 @@ class MainWindow(QMainWindow):
             lo.addSpacing(16)
         lo.addStretch()
         lv.addLayout(lo)
-        lb = QGridLayout()
-        lb.setHorizontalSpacing(4)
-        lb.setVerticalSpacing(4)
-        t = QLabel("Panneaux :")
-        t.setObjectName("hint")
-        lb.addWidget(t, 0, 0)
-        per_row = 9
-        for i, b in enumerate(self.dock_buttons):
-            lb.addWidget(b, i // per_row, 1 + i % per_row)
-        lb.setColumnStretch(per_row + 1, 1)
-        lv.addLayout(lb)
         pl.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         g.addWidget(pl, 3, 0, 1, 4)
         for r, k in ((0, 3), (1, 2), (2, 2)):   # la ligne du haut (chute d'eau) prend plus de place
@@ -1026,6 +1015,17 @@ class MainWindow(QMainWindow):
 
     # --- barre d'outils, menus et raccourcis -----------------------------------------
     def _build_toolbar_and_menus(self):
+        # rangée des panneaux, juste sous le menu
+        pt = QToolBar("Panneaux")
+        pt.setObjectName("paneltoolbar")
+        pt.setMovable(False)
+        self.addToolBar(Qt.TopToolBarArea, pt)
+        t = QLabel(" Panneaux : ")
+        t.setObjectName("hint")
+        pt.addWidget(t)
+        for b in self.dock_buttons:
+            pt.addWidget(b)
+        self.addToolBarBreak(Qt.TopToolBarArea)
         tb = QToolBar("Outils")
         tb.setObjectName("toolbar")
         tb.setMovable(False)
@@ -1941,7 +1941,7 @@ class MainWindow(QMainWindow):
             self.meter_s.set_value(st.po)
             self.meter_swr.set_value(st.swr)
             self.bar_alc.setValue(int(st.alc * 1000))
-            self.lb_meter.setText(f"ROS ≈ {st.swr_val:.1f}" if st.swr_val else "")
+            self.lb_meter.setText(f"SWR ≈ {st.swr_val:.1f}" if st.swr_val else "")
         else:
             self.meter_s.set_scale("S-mètre", S_SCALE, 130 / 255)
             self.meter_s.set_value(st.smeter)

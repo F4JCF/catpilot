@@ -402,7 +402,7 @@ TEMPLATES = {
     "Le port TCP {} est déjà utilisé.\n\n{}": "TCP port {} is already in use.\n\n{}",
     "{} logiciel connecté": "{} program connected", "{} logiciels connectés": "{} programs connected",
     "Mémoire {}   {}": "Memory {}   {}", "Mémoire {}": "Memory {}", "{} — hors segment du plan": "{} — outside band plan segments",
-    "{} — {}  ({} – {} MHz)": "{} — {}  ({} – {} MHz)", "PO {} %": "PO {} %", "ROS ≈ {}": "SWR ≈ {}",
+    "{} — {}  ({} – {} MHz)": "{} — {}  ({} – {} MHz)", "PO {} %": "PO {} %", "SWR ≈ {}": "SWR ≈ {}",
     "{} Hz → {}": "{} Hz → {}", "{} W": "{} W", "{} wpm": "{} wpm", "niveau {}": "level {}", "pos. {}": "pos. {}",
     "UTC {}  ({})": "UTC {}  ({})", "{} — {}°, {}° ({}). Clic : régler": "{} — {}°, {}° ({}). Click: set",
     "Données hamqsl.com inaccessibles ({}). Clic : réessayer": "hamqsl.com data unreachable ({}). Click: retry",
