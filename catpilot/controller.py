@@ -214,7 +214,17 @@ class RigController(QObject):
                     cat_log(f"erreur {errors} : {type(e).__name__} : {e}")
                 # liaison perdue seulement après plusieurs échecs ET plusieurs secondes sans réponse
                 # (un refus « ?; » ou un message en travers pendant la CW ne suffit pas)
+                if errors == MAX_ERRORS and hasattr(self.driver, "resync"):
+                    ok = self.driver.resync()
+                    cat_log("tentative de réveil de la liaison : " + ("réussie" if ok else "sans réponse"))
+                    if ok:
+                        errors, last_ok = 0, time.monotonic()
+                        continue
                 if errors >= MAX_ERRORS and time.monotonic() - last_ok > LOST_AFTER:
+                    if hasattr(self.driver, "diagnostics"):
+                        cat_log("derniers échanges avant la coupure :")
+                        for ln in self.driver.diagnostics():
+                            cat_log("    " + ln)
                     self._running = False
                     self.connected = False
                     cat_log(f"LIAISON PERDUE après {errors} erreurs : {e}")

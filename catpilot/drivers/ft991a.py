@@ -121,6 +121,41 @@ class FT991A(RigDriver):
     # --- échanges bas niveau ------------------------------------------------
     def _write(self, cmd):
         self.ser.write(cmd.encode("ascii"))
+        self._trace(">", cmd)
+
+    def _trace(self, way, text):
+        """Mémorise les 40 derniers échanges (journal en cas de coupure)."""
+        import collections
+        if not hasattr(self, "history"):
+            self.history = collections.deque(maxlen=40)
+        self.history.append(f"{time.strftime('%H:%M:%S')}.{int(time.time() * 1000) % 1000:03d} {way} {text}")
+
+    def diagnostics(self):
+        """Derniers échanges et état des lignes de la prise série, pour le journal CAT."""
+        lines = list(getattr(self, "history", []))
+        try:
+            s = self.ser
+            lines.append(f"lignes : RTS={int(s.rts)} DTR={int(s.dtr)} CTS={int(s.cts)} DSR={int(s.dsr)} "
+                         f"en attente={s.in_waiting} octets")
+        except Exception as e:
+            lines.append(f"lignes : illisibles ({e})")
+        return lines
+
+    def resync(self):
+        """Tente de réveiller la liaison : vide les tampons, lignes au repos, « ; » seul, puis FA;."""
+        try:
+            self.ser.reset_input_buffer()
+            self.ser.reset_output_buffer()
+            self.ser.rts = True
+            self.ser.dtr = True
+            self._write(";")
+            time.sleep(0.3)
+            self._quiet()
+            time.sleep(0.2)
+            self._query("FA;")
+            return True
+        except Exception:
+            return False
 
     def _query(self, cmd):
         self.ser.reset_input_buffer()
@@ -129,6 +164,7 @@ class FT991A(RigDriver):
         # « FA…; » pendant la manipulation CW en BK-IN…) : on les ignore et on lit la suite.
         for _ in range(6):
             r = self.ser.read_until(b";").decode("ascii", "ignore").strip()
+            self._trace("<", r or "(rien)")
             if r == "?;":
                 raise RigRefused(f"commande refusée : {cmd}")
             if not r.endswith(";"):
