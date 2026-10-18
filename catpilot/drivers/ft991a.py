@@ -125,14 +125,24 @@ class FT991A(RigDriver):
     def _query(self, cmd):
         self.ser.reset_input_buffer()
         self._write(cmd)
-        r = self.ser.read_until(b";").decode("ascii", "ignore")
-        if r == "?;":
-            raise RigRefused(f"commande refusée : {cmd}")
-        if not r.endswith(";"):
-            raise RigTimeout(f"pas de réponse à {cmd}")
-        if not r.startswith(cmd[:2]):
-            raise RigError(f"réponse inattendue {r!r} à {cmd}")
-        return r[:-1]
+        # Le poste peut glisser des messages non demandés (auto-information « TX1; »,
+        # « FA…; » pendant la manipulation CW en BK-IN…) : on les ignore et on lit la suite.
+        for _ in range(6):
+            r = self.ser.read_until(b";").decode("ascii", "ignore").strip()
+            if r == "?;":
+                raise RigRefused(f"commande refusée : {cmd}")
+            if not r.endswith(";"):
+                raise RigTimeout(f"pas de réponse à {cmd}")
+            if r.startswith(cmd[:2]):
+                return r[:-1]
+        raise RigError(f"réponse inattendue {r!r} à {cmd}")
+
+    def _quiet(self):
+        """Coupe l'auto-information du poste (messages envoyés sans être demandés)."""
+        try:
+            self._write("AI0;")
+        except Exception:
+            pass
 
     @staticmethod
     def _num(s):
@@ -168,21 +178,30 @@ class FT991A(RigDriver):
 
     # --- lecture -----------------------------------------------------------
     def poll(self, st):
+        now = time.monotonic()
+        if now - getattr(self, "_ai_t", 0) > 30:
+            self._ai_t = now
+            self._quiet()
         st.freq = int(self._query("FA;")[2:])
         st.mode = CODE_TO_MODE.get(self._query("MD0;")[3:4], st.mode)
         st.ptt = self._query("TX;")[2:3] in ("1", "2")
-        if st.ptt:
-            st.po = self._num(self._query("RM5;")[3:6]) / 255
-            raw = self._num(self._query("RM6;")[3:6])
-            st.swr, st.swr_val = raw / 255, interp(SWR_CAL, raw)
-            st.alc = self._num(self._query("RM4;")[3:6]) / 255
-            st.smeter = 0.0
-        else:
-            raw = self._num(self._query("SM0;")[3:6])
-            st.smeter = raw / 255
-            st.s_db = round(interp(SM_CAL, raw))
-            st.s_text = s_text_from_db(st.s_db)
-            st.po = st.swr = st.alc = st.swr_val = 0.0
+        # Les mesures ne doivent jamais faire tomber la liaison : en cas de raté,
+        # on garde la valeur précédente (fréquent en CW BK-IN, où le poste bascule sans arrêt).
+        try:
+            if st.ptt:
+                st.po = self._num(self._query("RM5;")[3:6]) / 255
+                raw = self._num(self._query("RM6;")[3:6])
+                st.swr, st.swr_val = raw / 255, interp(SWR_CAL, raw)
+                st.alc = self._num(self._query("RM4;")[3:6]) / 255
+                st.smeter = 0.0
+            else:
+                raw = self._num(self._query("SM0;")[3:6])
+                st.smeter = raw / 255
+                st.s_db = round(interp(SM_CAL, raw))
+                st.s_text = s_text_from_db(st.s_db)
+                st.po = st.swr = st.alc = st.swr_val = 0.0
+        except (RigError, ValueError):
+            pass
         # Beaucoup de refus dépendent du contexte (ATT ou DNR en FM/UHF, shift en FM...).
         # Au changement de mode ou de gamme, on redonne sa chance à tout le monde.
         ctx = (st.mode, 0 if st.freq < 60_000_000 else 1 if st.freq < 300_000_000 else 2)

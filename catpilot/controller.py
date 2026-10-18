@@ -16,6 +16,7 @@ from .drivers.base import RigState
 
 POLL_INTERVAL = 0.10
 MAX_ERRORS = 5
+LOST_AFTER = 6.0      # s sans aucune lecture réussie avant de déclarer la liaison perdue
 HOLD = 1.2           # s pendant lesquelles une valeur réglée prime sur la lecture
 CORE = ("freq", "mode", "ptt")
 METERS = ("smeter", "s_text", "s_db", "po", "swr", "swr_val", "alc")
@@ -177,6 +178,7 @@ class RigController(QObject):
                                   + f" : {self.driver.name} sur {self.driver.port}")
             except Exception as e:
                 self.message.emit(f"Allumage impossible : {e}")
+        last_ok = time.monotonic()
         while self._running:
             try:
                 self._send_pending()
@@ -184,10 +186,13 @@ class RigController(QObject):
                 tmp = self.snapshot()
                 self.driver.poll(tmp)
                 errors = 0
+                last_ok = time.monotonic()
                 self.state_changed.emit(self._merge(tmp))
             except Exception as e:
                 errors += 1
-                if errors >= MAX_ERRORS:
+                # liaison perdue seulement après plusieurs échecs ET plusieurs secondes sans réponse
+                # (un refus « ?; » ou un message en travers pendant la CW ne suffit pas)
+                if errors >= MAX_ERRORS and time.monotonic() - last_ok > LOST_AFTER:
                     self._running = False
                     self.connected = False
                     self.status_changed.emit(False, f"Liaison perdue avec le poste : {e}")

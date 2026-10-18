@@ -108,7 +108,7 @@ class Journal:
             self.db.execute("CREATE TABLE IF NOT EXISTS message (id INTEGER PRIMARY KEY, op INTEGER, "
                             + ", ".join(f"{c} TEXT" for c in COLS) + ")")
             have = {r[1] for r in self.db.execute("PRAGMA table_info(message)")}
-            for c in COLS:
+            for c in COLS + ["modif"]:
                 if c not in have:
                     self.db.execute(f"ALTER TABLE message ADD COLUMN {c} TEXT")
             self.db.commit()
@@ -138,14 +138,14 @@ class Journal:
                                    (op,)).fetchone()
 
     def messages(self, op, q=""):
-        sql = f"SELECT id, {', '.join(COLS)} FROM message WHERE op = ?"
+        sql = f"SELECT id, {', '.join(COLS)}, modif FROM message WHERE op = ?"
         args = [op]
         if q:
             sql += " AND (message LIKE ? OR de LIKE ? OR a LIKE ? OR suite LIKE ?)"
             args += [f"%{q}%"] * 4
         with self.lock:
             rows = self.db.execute(sql + " ORDER BY CAST(n AS INTEGER)", args).fetchall()
-        return [dict(zip(["id"] + COLS, r)) for r in rows]
+        return [dict(zip(["id"] + COLS + ["modif"], r)) for r in rows]
 
     def add(self, op, rec):
         with self.lock:
@@ -155,6 +155,16 @@ class Journal:
                             [op] + [rec.get(c, "") for c in COLS])
             self.db.commit()
         return n
+
+    def replace(self, mid, rec, note):
+        """Modifie un message ; la date de modification est gardée (traçabilité)."""
+        cols = [c for c in COLS if c not in ("n", "ts", "utc") and c in rec]
+        with self.lock:
+            old = self.db.execute("SELECT modif FROM message WHERE id = ?", (mid,)).fetchone()
+            modif = "; ".join(x for x in ((old[0] if old else ""), note) if x)
+            self.db.execute(f"UPDATE message SET {', '.join(c + ' = ?' for c in cols)}, modif = ? WHERE id = ?",
+                            [rec[c] for c in cols] + [modif, mid])
+            self.db.commit()
 
     def update(self, mid, col, value):
         if col not in COLS or col in ("n", "ts", "utc"):
@@ -257,13 +267,14 @@ class MainCouranteDock(QDockWidget):
         g.addWidget(self.ed_op, 4, 3)
         v.addLayout(g)
         h = QHBoxLayout()
-        b = QPushButton("Enregistrer le message")
+        self.b_save = b = QPushButton("Enregistrer le message")
         b.setToolTip("Raccourci : Ctrl+Entrée dans le texte")
         b.clicked.connect(self.save)
         h.addWidget(b)
-        b = QPushButton("Effacer")
+        self.b_clear = b = QPushButton("Effacer")
         b.clicked.connect(self.clear_form)
         h.addWidget(b)
+        self.editing = None
         v.addLayout(h)
         from PySide6.QtGui import QKeySequence, QShortcut
         for keys in ("Ctrl+Return", "Ctrl+Enter"):
@@ -282,12 +293,13 @@ class MainCouranteDock(QDockWidget):
         self.tbl.setHorizontalHeaderLabels(HEAD)
         self.tbl.verticalHeader().setVisible(False)
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.tbl.setEditTriggers(QAbstractItemView.DoubleClicked)
+        self.tbl.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.tbl.cellDoubleClicked.connect(self.edit_row)
         self.tbl.setWordWrap(True)
         hdr = self.tbl.horizontalHeader()
         hdr.setSectionResizeMode(QHeaderView.ResizeToContents)
         hdr.setSectionResizeMode(8, QHeaderView.Stretch)
-        self.tbl.setToolTip("Double-clic sur « Suite donnée » (ou un autre champ) pour le compléter")
+        self.tbl.setToolTip("Double-clic sur un message pour le modifier (la date de modification est notée)")
         self.tbl.itemChanged.connect(self._edited)
         v.addWidget(self.tbl, 1)
         h = QHBoxLayout()
@@ -380,6 +392,20 @@ class MainCouranteDock(QDockWidget):
         msg = self.ed_msg.toPlainText().strip()
         if not msg:
             return
+        if self.editing:
+            rec = {"sens": self.cb_sens.currentText(), "type": self.cb_type.text(), "de": self.ed_de.text(),
+                   "a": self.ed_a.text(), "moyen": self.ed_moyen.text(), "prio": self.cb_prio.currentText(),
+                   "message": msg, "suite": self.ed_suite.text().strip(), "operateur": self.ed_op.text().strip()}
+            note = f"modifié le {datetime.datetime.now():%d/%m/%Y à %H:%M}" + (
+                f" par {rec['operateur']}" if rec["operateur"] else "")
+            self.journal.replace(self.editing["id"], rec, note)
+            n = self.editing["n"]
+            self.win.statusBar().showMessage(f"Main courante : message n° {n} modifié")
+            for cb in (self.ed_de, self.ed_a, self.cb_type, self.ed_op, self.ed_moyen):
+                cb.remember()
+            self.clear_form()
+            self.refresh()
+            return
         if self.t0 is None:
             self._start_clock(force=True)
         rec = {"ts": self.t0.strftime("%d/%m/%Y %H:%M:%S"),
@@ -397,7 +423,37 @@ class MainCouranteDock(QDockWidget):
         self.clear_form()
         self.refresh()
 
+    def edit_row(self, row, _col=0):
+        """Double-clic : le message revient dans le formulaire pour être corrigé."""
+        if not 0 <= row < len(self.rows):
+            return
+        r = self.rows[row]
+        self.editing = r
+        self._filling = True
+        self.cb_sens.setCurrentText(r.get("sens") or "Reçu")
+        self.cb_type.setText(r.get("type") or "")
+        self.ed_de.setText(r.get("de") or "")
+        self.ed_a.setText(r.get("a") or "")
+        self.ed_moyen.setText(r.get("moyen") or "")
+        self.cb_prio.setCurrentText(r.get("prio") or "Routine")
+        self.ed_msg.blockSignals(True)
+        self.ed_msg.setPlainText(r.get("message") or "")
+        self.ed_msg.blockSignals(False)
+        self.ed_suite.setText(r.get("suite") or "")
+        self.ed_op.setText(r.get("operateur") or self.ed_op.text())
+        self._filling = False
+        self.t0 = "edit"
+        self.lb_time.setStyleSheet("color: #ff9800;")
+        self.lb_time.setText(f"{r.get('ts')}  — modification du message n° {r.get('n')}")
+        self.b_save.setText(f"Enregistrer la modification du n° {r.get('n')}")
+        self.b_clear.setText("Annuler la modification")
+        self.ed_msg.setFocus()
+
     def clear_form(self):
+        self.editing = None
+        if hasattr(self, "b_save"):
+            self.b_save.setText("Enregistrer le message")
+            self.b_clear.setText("Effacer")
         self.ed_msg.blockSignals(True)
         self.ed_msg.clear()
         self.ed_msg.blockSignals(False)
@@ -432,6 +488,10 @@ class MainCouranteDock(QDockWidget):
                     it.setFlags(it.flags() & ~Qt.ItemIsEditable)
                 if r.get("prio") in PRIO_COLORS:
                     it.setForeground(QColor(PRIO_COLORS[r["prio"]]))
+                if r.get("modif"):
+                    it.setToolTip(r["modif"])
+                    if key == "n":
+                        it.setText(f"{r['n']} ✎")
                 self.tbl.setItem(i, c, it)
         self.tbl.resizeRowsToContents()
         self.tbl.blockSignals(False)
@@ -458,9 +518,9 @@ class MainCouranteDock(QDockWidget):
             return
         with open(path, "w", newline="", encoding="utf-8-sig") as f:
             wr = csv.writer(f, delimiter=";")
-            wr.writerow(HEAD)
+            wr.writerow(HEAD + ["Modifications"])
             for r in self.journal.messages(op):
-                wr.writerow([r.get(c) or "" for c in COLS])
+                wr.writerow([r.get(c) or "" for c in COLS] + [r.get("modif") or ""])
         self.win.statusBar().showMessage(f"Main courante exportée dans {path}")
 
     def to_html(self, op):
@@ -477,7 +537,9 @@ class MainCouranteDock(QDockWidget):
         for r in rows:
             col = {"Urgent": "#fff3e0", "Très urgent": "#ffebee"}.get(r.get("prio"), "")
             out.append(f"<tr{f' style=\"background:{col}\"' if col else ''}>"
-                       + "".join(f"<td>{e(r.get(c) or '').replace(chr(10), '<br>')}</td>" for c in COLS) + "</tr>")
+                       + "".join(f"<td>{e(r.get(c) or '').replace(chr(10), '<br>')}"
+                                 + (f"<br><i style='color:#777'>({e(r['modif'])})</i>" if c == "message" and r.get("modif") else "")
+                                 + "</td>" for c in COLS) + "</tr>")
         out.append("</table>")
         out.append(f"<p style='margin-top:18px'>Édité le {datetime.datetime.now():%d/%m/%Y à %H:%M} par CAT Pilot."
                    "&nbsp;&nbsp;&nbsp; Visa du responsable : ______________________</p>")
