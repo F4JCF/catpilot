@@ -321,7 +321,6 @@ EXACT = {
     "Auto : mode reconnu par l'en-tête de l'image. Choisir le mode aide si le signal est faible.": "Auto: mode detected from the image header. Choosing the mode helps with weak signals.",
     "L'image reçue s'affiche ici\n(mode reconnu tout seul)": "The received image shows here\n(mode detected automatically)",
     "pas de réponse de {}": "no answer from {}", "QSO terminé": "QSO finished",
-    "Thème": "Theme", "Bleu nuit": "Night blue", "Noir classique": "Classic black",
     "Compte QRZ.com": "QRZ.com account", "Mot de passe QRZ.com": "QRZ.com password",
     "Ouvrir la fiche de l'indicatif sur QRZ.com": "Open the callsign page on QRZ.com",
     "Ouvrir la fiche de l'indicatif sur HamQTH.com": "Open the callsign page on HamQTH.com",
