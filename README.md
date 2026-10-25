@@ -1,6 +1,6 @@
 # CAT Pilot 0.13 — Yaesu et Icom
 
-Logiciel de pilotage CAT des Yaesu FT-991A, FT-891, FT-710, FTDX10 et des Icom IC-705, IC-7300, IC-9700 sous Windows et Linux, avec partage du CAT
+Logiciel de pilotage CAT des Yaesu FT-991A, FT-891, FT-710, FTDX10, FT-817/818, FT-857, FT-897 et des Icom IC-705, IC-7300, IC-9700 sous Windows et Linux, avec partage du CAT
 vers WSJT-X, JTDX, Log4OM, N1MM… grâce à un serveur compatible rigctld.
 
 ## Installation

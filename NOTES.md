@@ -1,4 +1,4 @@
-Nouveautés de la 0.24.1 :
-- Carnet : département du correspondant français (numéro et nom, ex. « 38 Isère »), trouvé d'après son code postal (fiche QRZ.com, HamQTH, QRZCQ), sa position ou son locator. Outre-mer d'après le préfixe (FR = 974 La Réunion…). Enregistré dans le QSO (champ ADIF STATE), colonne « Dépt » dans la liste, et modifiable par double-clic.
-- Petite carte dans le carnet : position du correspondant, son département en surbrillance et le trajet depuis votre locator, avec la distance et le cap. Molette pour zoomer.
-- Contours des départements : france-geojson, d'après Admin Express (IGN), Licence ouverte Etalab.
+Nouveautés de la 0.25.0 :
+- Un poste par indicatif : Carnet > « Mes indicatifs et leur matériel » (ou le bouton « Matériel… » à côté de « Je trafique en »). Pour chaque indicatif (F4JCF, F4JCF/P, FR/F4JCF/P…) : le poste, son port, sa vitesse, et si besoin un locator. Choisir l'indicatif dans le carnet fait passer CAT Pilot sur ce poste (en se reconnectant s'il était connecté) et, en portable, sur ce locator. Retour automatique à la position habituelle pour un indicatif sans locator.
+- Nouveaux postes : Yaesu FT-817, FT-818, FT-857 et FT-897 (CAT binaire). Ce que leur CAT ne permet pas de piloter (puissance, filtres, AGC, menus…) est masqué ; la CW passe par la ligne DTR/RTS d'une interface ; les mémoires sont gérées dans une banque sur le PC.
+- Le titre « Mise à jour » passe en orange quand une version est disponible (vérification discrète toutes les 6 heures).

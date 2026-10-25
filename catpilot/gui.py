@@ -11,7 +11,7 @@ import serial.tools.list_ports
 from PySide6.QtCore import QByteArray, QPointF, QRectF, QSettings, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup, QColor, QFont, QFontMetrics, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
-    QProxyStyle, QStyle,
+    QMenuBar,
     QApplication, QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout,
     QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar,
     QPushButton, QSizePolicy, QSlider, QSpinBox, QToolBar, QVBoxLayout, QWidget,
@@ -105,35 +105,42 @@ def apply_theme(app, name="jour", scale=1.0):
     AMBER, GREEN, RED, TEXT = c["amber"], c["green"], c["red"], c["text"]
     ARC_OK, NEEDLE, METER_BG = c["arc_ok"], c["needle"], c["panel"]
     app.setStyleSheet(make_style(name, scale))
+    UpdateMenuBar.colors = c
     for w in app.allWidgets():
         w.update()
 
 
 # --- widgets ------------------------------------------------------------------
-class MenuBarStyle(QProxyStyle):
-    """Dessine en orange le titre du menu « Mise à jour » quand une version est disponible."""
-    ORANGE = QColor("#ff8c1a")
+class UpdateMenuBar(QMenuBar):
+    """Barre de menus : le titre « Mise à jour » passe en orange (gras) quand une version est disponible.
 
-    def __init__(self):
-        super().__init__()
+    Dessiné par-dessus le rendu normal, sans dépendre du style de Windows ni de la feuille de style."""
+    ORANGE = QColor("#ff8c1a")
+    colors = {"toolbar": "#0b0b0b", "btn_hover": "#555"}    # mis à jour par apply_theme
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self.highlight_menu = None
 
-    def drawControl(self, element, option, painter, widget=None):
+    def paintEvent(self, e):
+        super().paintEvent(e)
         menu = self.highlight_menu
-        if element == QStyle.CE_MenuBarItem and menu is not None and option.text == menu.title():
-            painter.save()
-            r = option.rect
-            if option.state & QStyle.State_Selected:
-                painter.fillRect(r, QColor(255, 140, 26, 60))
-            f = QFont(painter.font())
-            f.setBold(True)
-            painter.setFont(f)
-            painter.setPen(self.ORANGE)
-            painter.drawText(r, Qt.AlignCenter | Qt.TextShowMnemonic, option.text)
-            painter.restore()
+        if menu is None:
             return
-        super().drawControl(element, option, painter, widget)
-
+        act = menu.menuAction()
+        r = self.actionGeometry(act)
+        if r.isEmpty():
+            return
+        p = QPainter(self)
+        active = self.activeAction() is act
+        p.fillRect(r, QColor(255, 140, 26, 70) if active else QColor(self.colors["toolbar"]))
+        f = QFont(self.font())
+        f.setBold(True)
+        p.setFont(f)
+        p.setPen(self.ORANGE)
+        from .i18n import tr
+        p.drawText(r, Qt.AlignCenter, tr(menu.title()).replace("&", ""))
+        p.end()
 
 
 class Panel(QFrame):
@@ -439,6 +446,7 @@ class MainWindow(QMainWindow):
         v = QVBoxLayout(w)
         v.setContentsMargins(0, 0, 0, 0)
         s, val = self._slider(key, lo, hi, fmt, vertical=True)
+        self.vslider_widgets[key] = w
         s.setMinimumHeight(110)
         v.addWidget(s, 1, Qt.AlignHCenter)
         t = QLabel(title)
@@ -457,8 +465,10 @@ class MainWindow(QMainWindow):
 
     # --- construction --------------------------------------------------------
     def _build_ui(self):
+        self.vslider_widgets = {}
+        self.panels = {}
         root = QWidget()
-        g = QGridLayout(root)
+        g = self.main_grid = QGridLayout(root)
         g.setSpacing(6)
         g.setContentsMargins(6, 6, 6, 6)
         from PySide6.QtWidgets import QStackedWidget
@@ -493,6 +503,7 @@ class MainWindow(QMainWindow):
         rl.addWidget(self._btn("Tune", lambda: self.ctrl.action("tune")))
         rl.addStretch()
         g.addWidget(pr, 0, 1)
+        self.panels["rf"] = pr
 
         # VFO
         pv = Panel("VFO")
@@ -521,6 +532,9 @@ class MainWindow(QMainWindow):
         for label, act in (("A/B", "swap"), ("A>B", "a_to_b"), ("B>A", "b_to_a")):
             h.addWidget(self._btn(label, lambda _c=False, a=act: self.ctrl.action(a)))
         h.addWidget(self._toggle("split", "Split"))
+        self.b_lock = self._toggle("lock", "LOCK")
+        self.b_lock.setToolTip("Verrouillage de la commande d'accord du poste")
+        h.addWidget(self.b_lock)
         h.addSpacing(10)
         self.b_vm = self._btn("V/M", lambda: self.ctrl.action("vm"), checkable=True)
         h.addWidget(self.b_vm)
@@ -653,6 +667,7 @@ class MainWindow(QMainWindow):
         cl.addLayout(cv)
         cl.addWidget(self._vslider("wpm", "Vitesse", 4, 60, lambda v: f"{v} wpm"))
         g.addWidget(pc, 1, 1)
+        self.panels["cw"] = pc
 
         # Clarifier + FM
         pcl = Panel("Clarifier et relais FM")
@@ -689,9 +704,14 @@ class MainWindow(QMainWindow):
         tv.addWidget(self.b_ptt)
         tv.addWidget(self._toggle("vox", "VOX"))
         tv.addWidget(self._toggle("proc", "PROC"))
+        self.lb_txhint = QLabel("Puissance, micro, VOX et processeur :\nà régler sur le poste\n(non pilotables par le CAT).")
+        self.lb_txhint.setObjectName("hint")
+        self.lb_txhint.setWordWrap(True)
+        tv.addWidget(self.lb_txhint)
         tv.addStretch()
         tl.addLayout(tv)
         g.addWidget(pt, 1, 3)
+        self.panels["tx"] = pt
 
         # Réception
         prx = Panel("Réception")
@@ -700,6 +720,7 @@ class MainWindow(QMainWindow):
         xl.addWidget(self._vslider("rf", "Gain HF", 0, 255, lambda v: f"{round(v / 2.55)} %"))
         xl.addWidget(self._vslider("sql", "Squelch", 0, 100, str))
         g.addWidget(prx, 2, 0)
+        self.panels["rx"] = prx
 
         # Filtres
         pf = Panel("Filtres")
@@ -725,6 +746,7 @@ class MainWindow(QMainWindow):
             bh.addWidget(self._toggle(key, label))
         fl.addLayout(bh, 2, 3, 1, 3)
         g.addWidget(pf, 2, 1, 1, 3)
+        self.panels["filters"] = pf
 
         # Liaison et partage
         pl = Panel("Liaison et partage du CAT")
@@ -812,7 +834,7 @@ class MainWindow(QMainWindow):
 
         g.setColumnStretch(2, 1)
         g.setColumnStretch(3, 1)
-        self.statusBar().showMessage("Choisissez le port du FT-991A puis cliquez sur Connecter")
+        self.statusBar().showMessage("Choisissez le poste et son port, puis cliquez sur Connecter")
         self.refresh_ports()
 
     # --- réglages ----------------------------------------------------------------
@@ -1122,6 +1144,12 @@ class MainWindow(QMainWindow):
     def refresh_audio(self, wanted=None):
         self.cb_audio.clear()
         inputs = list_inputs()
+        from . import waterfall
+        if waterfall.sd is None and sys.platform.startswith("linux"):
+            self.cb_audio.setToolTip("Audio indisponible : installez la bibliothèque PortAudio "
+                                     "(paquet libportaudio2, ou portaudio sur Fedora/Arch), puis relancez.")
+            QTimer.singleShot(3000, lambda: self.statusBar().showMessage(
+                "Audio indisponible : installez le paquet libportaudio2 (PortAudio), puis relancez le logiciel", 20000))
         for dev, label in inputs:
             self.cb_audio.addItem(label, dev)
         i = self.cb_audio.findText(wanted) if wanted else -1
@@ -1166,8 +1194,9 @@ class MainWindow(QMainWindow):
         t = QLabel(" Panneaux : ")
         t.setObjectName("hint")
         pt.addWidget(t)
+        self.dock_actions = {}
         for b in self.dock_buttons:
-            pt.addWidget(b)
+            self.dock_actions[b] = pt.addWidget(b)
         self.addToolBarBreak(Qt.TopToolBarArea)
         tb = QToolBar("Outils")
         tb.setObjectName("toolbar")
@@ -1189,7 +1218,7 @@ class MainWindow(QMainWindow):
         tb.addSeparator()
         self.ck_pwrband = QCheckBox("Puissance mémorisée par bande")
         self.ck_pwrband.setToolTip("Chaque bande retrouve la dernière puissance utilisée")
-        tb.addWidget(self.ck_pwrband)
+        self.act_pwrband = tb.addWidget(self.ck_pwrband)
         tb.addSeparator()
         tb.addWidget(QLabel("Sécurité TX : coupure après "))
         self.sp_tot = QSpinBox()
@@ -1225,8 +1254,10 @@ class MainWindow(QMainWindow):
         self._clock.start(1000)
         self.update_clock()
 
+        self.setMenuBar(UpdateMenuBar(self))
         mb = self.menuBar()
         m = self.menu_poste = mb.addMenu("Poste")
+        self.menu_actions = []
         for label, slot in (("Allumer et connecter", self.power_on_connect),
                             ("Éteindre et déconnecter", self.power_off_disconnect), (None, None),
                             ("Sauvegarder les menus du poste…", self.backup_menus),
@@ -1238,6 +1269,8 @@ class MainWindow(QMainWindow):
             a = QAction(label, self)
             a.triggered.connect(slot)
             m.addAction(a)
+            if "menus" in label:
+                self.menu_actions.append(a)
         aff = self.menu_aff = mb.addMenu("Affichage")
         for label, btn in (("Spots POTA, SOTA et DX", self.b_spots), ("Carte et ligne grise", self.b_map),
                            ("Carnet de trafic", self.b_log), ("Modes numériques (FT8, RTTY, PSK31, SSTV)", self.b_digi),
@@ -1249,9 +1282,12 @@ class MainWindow(QMainWindow):
             a = QAction(label, self)
             a.triggered.connect(lambda _c=False, b=btn: b.setChecked(True))
             aff.addAction(a)
+            if btn is self.b_txa:
+                self.menu_actions.append(a)      # réglages audio d'émission : par les menus du poste
         a = QAction("Menus du poste…", self)
         a.triggered.connect(lambda: self.open_menu_editor(""))
         m.addAction(a)
+        self.menu_actions.append(a)
         m.addSeparator()
         a = QAction("Position de la station…", self)
         a.triggered.connect(self.position_dialog)
@@ -1300,6 +1336,7 @@ class MainWindow(QMainWindow):
                             ("Étiquettes QSL des cartes à envoyer…", lambda: self.qsl_labels(None)),
                             ("Diplômes et statistiques…", self.awards_dialog),
                             (None, None),
+                            ("Mes indicatifs et leur matériel…", self.stations_dialog),
                             ("Réglages : indicatif, HamQTH, QRZCQ et QRZ.com…", self.log_settings)):
             if label is None:
                 cm.addSeparator()
@@ -1324,8 +1361,6 @@ class MainWindow(QMainWindow):
         self._upd_dialog = None
         self._restart_for_update = False
         self.menu_upd = mb.addMenu("Mise à jour")
-        self.mb_style = MenuBarStyle()
-        mb.setStyle(self.mb_style)
         a = QAction("Vérifier les mises à jour…", self)
         a.triggered.connect(lambda: self.upd.check(manual=True))
         self.menu_upd.addAction(a)
@@ -1337,8 +1372,13 @@ class MainWindow(QMainWindow):
         a = QAction("Voir toutes les versions sur GitHub", self)
         a.triggered.connect(self.open_releases_page)
         self.menu_upd.addAction(a)
+        self._silent_check = False
         if self.act_upd_start.isChecked():
             QTimer.singleShot(4000, lambda: self.upd.check(manual=False))
+        # vérification discrète toutes les 6 heures : « Mise à jour » passe en orange sans fenêtre
+        self._upd_timer = QTimer(self)
+        self._upd_timer.timeout.connect(self._periodic_update_check)
+        self._upd_timer.start(6 * 3600 * 1000)
 
         def sc(keys, slot):
             QShortcut(QKeySequence(keys), self, activated=slot)
@@ -1483,7 +1523,7 @@ class MainWindow(QMainWindow):
         self.ck_on.setChecked(keep)
 
     def power_off_disconnect(self):
-        if self.ctrl.connected and QMessageBox.question(self, "Éteindre", "Éteindre le FT-991A ?") == QMessageBox.Yes:
+        if self.ctrl.connected and QMessageBox.question(self, "Éteindre", f"Éteindre le {self.ctrl.driver.name} ?") == QMessageBox.Yes:
             self.ctrl.disconnect_rig(power_off=True)
 
     # --- sauvegarde des menus -------------------------------------------------------------------------
@@ -1579,7 +1619,9 @@ class MainWindow(QMainWindow):
             self.mem.adapt(drv)
         if hasattr(self, "compact"):
             self.compact.fill_modes(drv.modes + (["C4FM"] if getattr(drv, "has_c4fm", False) else []))
-        self.mode_buttons["C4FM"].setVisible(getattr(drv, "has_c4fm", True))
+        for mode, b in self.mode_buttons.items():
+            b.setVisible(mode in drv.modes or (mode == "C4FM" and getattr(drv, "has_c4fm", False)))
+        self._adapt_controls(drv)
         for b in (self.b_qmb_sto, self.b_qmb_rcl):
             b.setVisible(getattr(drv, "has_qmb", True))
         top = getattr(drv, "max_power", 100)
@@ -1589,6 +1631,34 @@ class MainWindow(QMainWindow):
         if not getattr(drv, "has_usb_audio", True):
             self.cb_audio.setToolTip("Ce poste n'a pas de carte son USB : choisissez l'entrée de votre "
                                      "interface audio (SCU-17, Signalink…)")
+
+    def _adapt_controls(self, drv):
+        """Masque ce que le CAT du poste ne permet pas de piloter (FT-817/857/897 : presque tout
+        se règle sur le poste ; seuls fréquence, mode, PTT, split, clarifier, relais et tonalité passent)."""
+        cat = getattr(drv, "cat_params", None)
+        ok = (lambda k: True) if cat is None else (lambda k: k in cat)
+        for name in ("rf", "cw", "rx", "filters"):
+            self.panels[name].setVisible(cat is None)
+        for key, w in self.vslider_widgets.items():
+            w.setVisible(ok(key))
+        for key in ("vox", "proc"):
+            self.toggles[key].setVisible(ok(key))
+        self.lb_txhint.setVisible(cat is not None)
+        self.act_pwrband.setVisible(ok("pwr"))
+        self.b_lock.setVisible(getattr(drv, "has_lock", False))
+        self.b_vm.setVisible(getattr(drv, "has_vm", True))
+        self.b_txclar.setVisible(getattr(drv, "has_tx_clar", True))
+        menus = getattr(drv, "has_menus", True)
+        for a in self.menu_actions:
+            a.setVisible(menus)
+        if hasattr(self, "b_txa"):
+            act = getattr(self, "dock_actions", {}).get(self.b_txa)
+            (act or self.b_txa).setVisible(menus)
+            if not menus and self.b_txa.isChecked():
+                self.b_txa.setChecked(False)
+        self.main_grid.setRowStretch(2, 2 if cat is None else 0)
+        if hasattr(self, "cw"):
+            self.cw.adapt(drv)
 
     # --- carnet, spots, rotor -----------------------------------------------------------------
     def _reload_worked(self):
@@ -1864,7 +1934,15 @@ class MainWindow(QMainWindow):
         s.setValue("mycall", call)
         self.cw.ed_mycall.setText(call)
         self.logdock.fill_mycalls()
-        self.statusBar().showMessage(f"Prochains QSO enregistrés avec l'indicatif {call}", 8000)
+        from .stations import apply
+        extra = apply(self, call)
+        self.statusBar().showMessage(f"Prochains QSO enregistrés avec l'indicatif {call}"
+                                     + (f" — {extra}" if extra else ""), 12000)
+        self.logdock.lb_mycall.setText(" · ".join(x for x in (self.logdock.lb_mycall.text(), extra) if x))
+
+    def stations_dialog(self):
+        from .stations import StationsDialog
+        StationsDialog(self).exec()
 
     def remove_call(self, call):
         import json
@@ -2143,9 +2221,14 @@ class MainWindow(QMainWindow):
     # --- mises à jour ------------------------------------------------------------------------
     def set_update_flag(self, available, version=""):
         """Titre « Mise à jour » en orange tant qu'une nouvelle version attend."""
-        self.mb_style.highlight_menu = self.menu_upd if available else None
+        self.menuBar().highlight_menu = self.menu_upd if available else None
         self.menu_upd.menuAction().setToolTip(f"Nouvelle version disponible : {version}" if available else "")
         self.menuBar().update()
+
+    def _periodic_update_check(self):
+        if self.act_upd_start.isChecked():
+            self._silent_check = True
+            self.upd.check(manual=False)
 
     def open_releases_page(self):
         from PySide6.QtCore import QUrl
@@ -2153,6 +2236,7 @@ class MainWindow(QMainWindow):
         QDesktopServices.openUrl(QUrl(RELEASES_PAGE))
 
     def on_update_checked(self, info, manual):
+        silent, self._silent_check = self._silent_check, False
         if isinstance(info, Exception):
             if manual:
                 QMessageBox.warning(self, "Mise à jour",
@@ -2163,6 +2247,10 @@ class MainWindow(QMainWindow):
             if manual:
                 QMessageBox.information(self, "Mise à jour",
                                         f"Vous avez déjà la dernière version ({__version__}).")
+            return
+        if silent and not manual:
+            self.set_update_flag(True, info["version"])
+            self.statusBar().showMessage(f"Nouvelle version disponible : {info['version']} (menu « Mise à jour »)")
             return
         if not manual and self.settings.value("update_skip", "") == info["version"]:
             self.set_update_flag(True, info["version"])

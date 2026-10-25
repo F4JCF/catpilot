@@ -1,3 +1,4 @@
+from .ft817 import FT817, FT818, FT857, FT897
 from .ft891 import FT891
 from .ft991a import FT991A
 from .ic705 import IC705
@@ -12,6 +13,10 @@ DRIVERS = {
     "Icom IC-705": IC705,
     "Icom IC-7300": IC7300,
     "Icom IC-9700": IC9700,
+    "Yaesu FT-817": FT817,
+    "Yaesu FT-818": FT818,
+    "Yaesu FT-857": FT857,
+    "Yaesu FT-897": FT897,
     "Simulateur (sans poste)": SimDriver,
 }
 

@@ -20,6 +20,7 @@ MEM_MODES = [("USB", "2"), ("LSB", "1"), ("CW", "3"), ("CW-R", "7"), ("AM", "5")
              ("DATA-FM", "A"), ("RTTY-L", "6"), ("RTTY-U", "9"), ("DV", "V")]
 LABEL_TO_CODE = dict(MEM_MODES)
 CODE_TO_LABEL = {c: l for l, c in MEM_MODES}
+_EXTRA = []                       # codes supplémentaires (aucun : la liste ci-dessus est complète)
 SHIFTS = ["", "+", "−"]
 TONES = ["", "TSQ", "Tone", "DCS"]
 COLS = ["Canal", "Nom", "Fréquence", "Mode", "Relais", "Tonalité"]
@@ -131,7 +132,7 @@ class MemoryDock(QDockWidget):
             self.buttons.append(b)
             return b
 
-        btn("Lire les mémoires", self.read_from_radio, 0, 0)
+        self.b_read = btn("Lire les mémoires", self.read_from_radio, 0, 0)
         btn("Rappeler", lambda: self.recall(self.tbl.currentRow()), 0, 1)
         btn("Ajouter un canal", self.add_channel, 0, 2, "Nouveau canal libre avec la fréquence et le mode actuels")
         self.b_write = btn("Écrire dans le poste", self.write_to_radio, 1, 0,
@@ -211,7 +212,21 @@ class MemoryDock(QDockWidget):
     def mem_range(self):
         return getattr(self._drv(), "mem_range", (1, 117))
 
+    def on_pc(self):
+        return bool(getattr(self._drv(), "mem_on_pc", False))
+
     def adapt(self, drv):
+        pc = bool(getattr(drv, "mem_on_pc", False))
+        self.b_read.setText("Charger la banque PC" if pc else "Lire les mémoires")
+        self.b_write.setText("Enregistrer la banque PC" if pc else "Écrire dans le poste")
+        self.b_read.setToolTip("Le CAT de ce poste ne donne pas accès à ses mémoires : les canaux sont "
+                               "enregistrés sur le PC (Documents\\CATPilot\\memoires_pc.json)" if pc else "")
+        self.b_write.setToolTip("Enregistre sur le PC les lignes modifiées (en jaune)" if pc
+                                else "Envoie au poste les lignes modifiées (en jaune)")
+        self.tbl.setToolTip("Double-clic sur le numéro : le poste se règle sur ce canal "
+                            "(fréquence, mode, relais, tonalité).\nDouble-clic sur une autre colonne : modifier."
+                            if pc else "Double-clic sur le numéro : rappeler la mémoire.\n"
+                            "Double-clic sur une autre colonne : modifier.")
         grouped = bool(getattr(drv, "mem_groups", None))
         self.lb_group.setVisible(grouped)
         self.sp_group.setVisible(grouped)
@@ -288,7 +303,20 @@ class MemoryDock(QDockWidget):
 
     def recall(self, row):
         if 0 <= row < len(self.memories):
-            self.ctrl.action("mem_recall", self.memories[row]["ch"])
+            self._recall(self.memories[row])
+
+    def _recall(self, m):
+        if not self.on_pc():
+            self.ctrl.action("mem_recall", m["ch"])
+            return
+        # banque PC : le logiciel règle lui-même le poste (même pour un canal pas encore enregistré)
+        from .drivers.ft991a import CODE_TO_MODE
+        mode = CODE_TO_MODE.get(m.get("code"), m.get("mode") or "FM")
+        self.ctrl.set_freq(int(m["freq"]))
+        self.ctrl.set_mode(mode)
+        if mode in ("FM", "PKTFM"):
+            self.ctrl.set_param("rpt_shift", int(m.get("shift", 0) or 0))
+            self.ctrl.set_param("tone_mode", int(m.get("ctcss", 0) or 0))
 
     def add_channel(self):
         used = {m["ch"] for m in self.memories}
@@ -357,7 +385,7 @@ class MemoryDock(QDockWidget):
                 m["tag"] = clean_tag(row[1] if len(row) > 1 else "", self.tag_len())
                 m["freq"] = parse_freq(row[2])
                 mode = (row[3].strip().upper() if len(row) > 3 else "FM").replace("CWR", "CW-R")
-                m["code"] = next((c for l, c in MEM_MODES if l.upper() == mode), "4")
+                m["code"] = next((c for l, c in MEM_MODES + _EXTRA if l.upper() == mode), "4")
                 sh = row[4].strip() if len(row) > 4 else ""
                 m["shift"] = {"": 0, "0": 0, "+": 1, "1": 1, "-": 2, "−": 2, "2": 2}.get(sh, 0)
                 tn = row[5].strip().upper() if len(row) > 5 else ""
@@ -378,7 +406,7 @@ class MemoryDock(QDockWidget):
     def write_to_radio(self):
         if not self.ctrl.connected:
             return
-        if not self.read_copy:
+        if not self.read_copy and not self.on_pc():
             QMessageBox.information(self, "Lecture nécessaire",
                                     "Lisez d'abord les mémoires du poste : elles servent de modèle "
                                     "pour l'écriture et sont sauvegardées avant toute modification.")
@@ -394,6 +422,9 @@ class MemoryDock(QDockWidget):
                             for m in todo[:12])
         if len(todo) > 12:
             listing += f"\n… et {len(todo) - 12} autres"
+        if self.on_pc():
+            self.ctrl.job("write_memories", [dict(m) for m in todo], "")
+            return
         if QMessageBox.question(self, "Écrire dans le poste",
                                 f"Écrire {len(todo)} canal(aux) dans le {self._drv().name} ?\n\n{listing}\n\n"
                                 "Les mémoires actuelles du poste seront d'abord sauvegardées.") \
@@ -418,7 +449,8 @@ class MemoryDock(QDockWidget):
         elif name == "write_memories":
             bad = [ch for ch, ok in res if not ok]
             ok = len(res) - len(bad)
-            msg = f"{ok} canal(aux) écrit(s) et vérifié(s)."
+            msg = (f"{ok} canal(aux) enregistré(s) dans la banque PC." if self.on_pc()
+                   else f"{ok} canal(aux) écrit(s) et vérifié(s).")
             if bad:
                 msg += ("\n\nÉchec ou vérification impossible pour : "
                         + ", ".join(f"{c:03d}" for c in bad))
@@ -465,7 +497,7 @@ class MemoryDock(QDockWidget):
         if self.cb_scan.currentIndex() == 0:
             self.scan_idx = (self.scan_idx + 1) % len(self.memories)
             m = self.memories[self.scan_idx]
-            self.ctrl.action("mem_recall", m["ch"])
+            self._recall(m)
             self.lb_scan.setText(f"Scan : {m['ch']:03d} {m.get('tag', '')}  {fmt_freq(m['freq'])}")
         else:
             self.scan_f += self.cb_sstep.currentData()

@@ -8,7 +8,7 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QPlainTextEdit, QProgressBar, QDialog, QDockWidget, QGridLayout, QHBoxLayout, QHeaderView,
-    QLabel, QLineEdit, QMessageBox, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout,
+    QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout,
     QWidget,
 )
 
@@ -84,6 +84,23 @@ class CwDock(QDockWidget):
         g.addWidget(self.ed_mycall, 2, 1)
         g.addWidget(QLabel("Corresp."), 2, 2)
         g.addWidget(self.ed_call, 2, 3)
+        # vitesse réglée ici quand le poste ne la donne pas par le CAT (FT-817/857/897)
+        self.lb_wpm = QLabel("Vitesse")
+        self.sp_wpm = QSpinBox()
+        self.sp_wpm.setRange(5, 50)
+        self.sp_wpm.setSuffix(" wpm")
+        self.sp_wpm.setValue(int(s.value("cw_wpm", 20)))
+        g.addWidget(self.lb_wpm, 3, 0)
+        g.addWidget(self.sp_wpm, 3, 1)
+        self.lb_key_hint = QLabel("Manipulation par la ligne DTR ou RTS d'une interface reliée à la prise "
+                                  "KEY du poste (Digirig, interface CW série…). Ce port doit être différent "
+                                  "du port CAT, sauf si l'interface le permet.")
+        self.lb_key_hint.setObjectName("hint")
+        self.lb_key_hint.setWordWrap(True)
+        g.addWidget(self.lb_key_hint, 4, 0, 1, 4)
+        self.lb_wpm.hide()
+        self.sp_wpm.hide()
+        self.lb_key_hint.hide()
         v.addLayout(g)
 
         self.ed_text = QLineEdit()
@@ -118,12 +135,14 @@ class CwDock(QDockWidget):
         t = QLabel("Messages enregistrés dans le poste")
         t.setObjectName("hint")
         v.addWidget(t)
+        self.rig_mem_widgets = [t]
         h = QHBoxLayout()
         for i in range(1, 6):
             b = QPushButton(f"Mém. {i}")
             b.setToolTip(f"Faire jouer la mémoire {i} du keyer du poste")
             b.clicked.connect(lambda _c=False, n=i: self.play_memory(n))
             h.addWidget(b)
+            self.rig_mem_widgets.append(b)
         v.addLayout(h)
         self.lb = QLabel("")
         self.lb.setObjectName("value")
@@ -144,7 +163,6 @@ class CwDock(QDockWidget):
         self.cb_cq.setToolTip("Message répété")
         h.addWidget(self.cb_cq)
         h.addWidget(QLabel("écoute"))
-        from PySide6.QtWidgets import QSpinBox
         self.sp_cq = QSpinBox()
         self.sp_cq.setRange(2, 60)
         self.sp_cq.setSuffix(" s")
@@ -343,12 +361,27 @@ class CwDock(QDockWidget):
         s.setValue("cq_listen", self.sp_cq.value())
         s.setValue("cq_max", self.sp_cqmax.value())
         s.setValue("cw_method", self.cb_method.currentIndex())
+        s.setValue("cw_wpm", self.sp_wpm.value())
         s.setValue("cw_port", self.cb_kport.currentData() or "")
         s.setValue("mycall", self.ed_mycall.text())
         s.setValue("cw_macros", json.dumps([e.text() for e in self.macros]))
         self.stop()
         if self.keyer:
             self.keyer.close()
+
+    def adapt(self, drv):
+        """Sans keyer pilotable par CAT : manipulation par DTR/RTS et vitesse réglée ici."""
+        cat = getattr(drv, "has_cw_memory", True)
+        item = self.cb_method.model().item(0)
+        if item is not None:
+            item.setEnabled(cat)
+        if not cat and self.cb_method.currentIndex() == 0:
+            self.cb_method.setCurrentIndex(1)
+        for w in self.rig_mem_widgets:
+            w.setVisible(cat)
+        for w in (self.lb_wpm, self.sp_wpm, self.lb_key_hint):
+            w.setVisible(not cat)
+        self._own_wpm = not cat
 
     def _method_changed(self):
         self.cb_kport.setEnabled(self.cb_method.currentIndex() > 0)
@@ -376,6 +409,8 @@ class CwDock(QDockWidget):
         return True
 
     def wpm(self):
+        if getattr(self, "_own_wpm", False):
+            return self.sp_wpm.value()
         return int(self.ctrl.snapshot().p.get("wpm", 20))
 
     def send(self, text, clear=False):
