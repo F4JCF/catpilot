@@ -1,6 +1,4 @@
-Nouveautés de la 0.24.0 : CAT Pilot fonctionne aussi sous Linux.
-- Nouveau fichier CATPilot-x86_64.AppImage : à rendre exécutable puis à lancer d'un double-clic, sans installation (Ubuntu 22.04 et suivantes, Debian 12, Linux Mint 21, Fedora…, 64 bits). Aussi en archive CATPilot-linux-x86_64.tar.gz.
-- Sous Linux : ports /dev/ttyUSB0 (Enhanced, CAT) et /dev/ttyUSB1 (Standard, CW/PTT) reconnus ; message d'aide si l'accès au port est refusé (groupe « dialout ») ou si le port est occupé (ModemManager).
-- Son, chute d'eau, modes numériques (FT8/FT4, RTTY, PSK31, SSTV), SDR RTL inclus. Annonces vocales par speech-dispatcher ou espeak-ng. TQSL (LoTW) trouvé dans /usr/bin.
-- Mise à jour automatique de l'AppImage depuis le menu « Mise à jour ».
-- Windows : rien ne change.
+Nouveautés de la 0.24.1 :
+- Carnet : département du correspondant français (numéro et nom, ex. « 38 Isère »), trouvé d'après son code postal (fiche QRZ.com, HamQTH, QRZCQ), sa position ou son locator. Outre-mer d'après le préfixe (FR = 974 La Réunion…). Enregistré dans le QSO (champ ADIF STATE), colonne « Dépt » dans la liste, et modifiable par double-clic.
+- Petite carte dans le carnet : position du correspondant, son département en surbrillance et le trajet depuis votre locator, avec la distance et le cap. Molette pour zoomer.
+- Contours des départements : france-geojson, d'après Admin Express (IGN), Licence ouverte Etalab.

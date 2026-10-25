@@ -107,6 +107,7 @@ class WorldMap(QWidget):
         self.station = None
         self.layers = {}
         self.greyline = True
+        self.shapes = []                  # contours supplémentaires : {"rings", "pen", "fill"} (départements…)
         self._night = None
         self._night_t = None
         self._drag = None
@@ -259,6 +260,17 @@ class WorldMap(QWidget):
         p.setBrush(Qt.NoBrush)
         p.setPen(QPen(QColor(255, 255, 255, 40), 0.7))
         p.drawPath(borders)
+        for sh in self.shapes:
+            path = QPainterPath()
+            for ring in sh["rings"]:
+                for k, (lo, la) in enumerate(ring):
+                    x, y = self.to_xy(la, lo)
+                    path.moveTo(x, y) if k == 0 else path.lineTo(x, y)
+                path.closeSubpath()
+            p.setPen(QPen(QColor(sh.get("pen", "#ffffff40")), sh.get("width", 0.6)))
+            p.setBrush(QColor(sh["fill"]) if sh.get("fill") else Qt.NoBrush)
+            p.drawPath(path)
+        p.setBrush(Qt.NoBrush)
         # graticule tous les 30°
         p.setPen(QPen(QColor(255, 255, 255, 22), 1, Qt.DotLine))
         for lon in range(-180, 181, 30):

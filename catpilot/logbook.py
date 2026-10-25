@@ -23,7 +23,7 @@ FIELDS = ["call", "qso_date", "time_on", "freq", "band", "mode", "submode", "rst
           "tx_pwr", "my_gridsquare", "station_callsign", "operator", "country",
           "contest_id", "stx", "srx", "stx_string", "srx_string",
           "qsl_via", "eqsl_qsl_rcvd", "eqsl_qslrdate", "lotw_qsl_rcvd", "lotw_qslrdate",
-          "qsl_sent", "qsl_rcvd", "qsl_sent_via", "qslsdate", "qslrdate"]
+          "qsl_sent", "qsl_rcvd", "qsl_sent_via", "qslsdate", "qslrdate", "state"]
 # Champs propres aux confirmations : jamais envoyés aux carnets en ligne
 QSL_FIELDS = ("eqsl_qsl_rcvd", "eqsl_qslrdate", "lotw_qsl_rcvd", "lotw_qslrdate")
 
@@ -262,7 +262,8 @@ class HamQTH(QObject):
             return {"name": full_name(" ".join(x for x in (f("fname"), f("name")) if x)) or f("nickname"),
                     "qth": qth, "country": f("country"), "grid": f("grid"), "itu": f("ituzone"),
                     "cq": f("cqzone"), "lat": f("lat"), "lon": f("lon"), "qsl_via": f("qslmgr"),
-                    "lotw": f("lotw") == "1", "eqsl": f("eqsl") == "1", "photo": f("image"), "src": "QRZ.com"}, None
+                    "lotw": f("lotw") == "1", "eqsl": f("eqsl") == "1", "photo": f("image"),
+                    "zip": f("zip"), "src": "QRZ.com"}, None
         return None, None
 
     def _hamqth(self, call):
@@ -284,6 +285,7 @@ class HamQTH(QObject):
             info = {k: self._text(root, k) for k in
                     ("nick", "adr_name", "qth", "country", "grid", "itu", "cq", "lat", "lon", "qsl_via")}
             info["photo"] = self._text(root, "picture")
+            info["zip"] = self._text(root, "adr_zip")
             info["lotw"] = self._text(root, "lotw").upper() == "Y"
             info["eqsl"] = self._text(root, "eqsl").upper() == "Y"
             full = full_name(info.pop("adr_name", ""))
@@ -320,7 +322,7 @@ class HamQTH(QObject):
                     "itu": f("itu"), "cq": f("cq"), "lat": f("latitude"), "lon": f("longitude"),
                     "qsl_via": f("manager"), "lotw": f("lotw").upper() in ("1", "Y", "YES"),
                     "eqsl": (f("eqsl") or f("eqsle")).upper() in ("1", "Y", "YES"),
-                    "photo": f("picture") or f("image") or f("qslpic"), "src": "QRZCQ"}, None
+                    "photo": f("picture") or f("image") or f("qslpic"), "zip": f("zip"), "src": "QRZCQ"}, None
         return None, None
 
     def _callook(self, call):
@@ -378,9 +380,9 @@ class HamQTH(QObject):
         self.result.emit(call, info)
 
 
-TABLE_COLS = ["Date", "UTC", "Indicatif", "Nom", "Pays", "Fréquence", "Bande", "Mode", "Env.", "Reçu",
+TABLE_COLS = ["Date", "UTC", "Indicatif", "Nom", "Pays", "Dépt", "Fréquence", "Bande", "Mode", "Env.", "Reçu",
               "QSL", "eQSL", "LoTW", "♪", "Réf."]
-C_PAYS, C_FREQ, C_QSL, C_EQSL, C_LOTW, C_AUDIO = 4, 5, 10, 11, 12, 13
+C_PAYS, C_DEPT, C_FREQ, C_QSL, C_EQSL, C_LOTW, C_AUDIO = 4, 5, 6, 11, 12, 13, 14
 
 
 class PhotoLoader(QObject):
@@ -701,9 +703,13 @@ class LogDock(QDockWidget):
             vb.addWidget(ed)
             return box
         self.ed_name.setPlaceholderText("prénom et nom")
+        self.ed_dept = QLineEdit()
+        self.ed_dept.setPlaceholderText("stations françaises : trouvé d'après le code postal ou le locator")
+        self.ed_dept.setToolTip("Numéro et nom du département (ex. 06 Alpes-Maritimes) ; enregistré dans le QSO")
+        self.ed_grid.textEdited.connect(self._grid_edited)
         rows = [("Indicatif", call_box), ("Nom", self.ed_name), ("QTH", self.ed_qth),
-                ("Locator", self.ed_grid), ("RST", rst_box), ("Mode", self.cb_mode),
-                ("Fréquence", self.lb_freq), ("Commentaire", self.ed_comment),
+                ("Département", self.ed_dept), ("Locator", self.ed_grid), ("Mode", self.cb_mode),
+                ("RST", rst_box), ("Fréquence", self.lb_freq), ("Commentaire", self.ed_comment), ("", QWidget()),
                 ("Son activité", stack(self.cb_sig, self.ed_ref)),
                 ("Mon activité", stack(self.cb_mysig, self.ed_myref))]
         for i, (label, wd) in enumerate(rows):
@@ -759,6 +765,13 @@ class LogDock(QDockWidget):
         self.photos.loaded.connect(self._on_photo)
         hi.addWidget(self.lb_photo)
         hi.addWidget(self.lb_info, 1)
+        from .worldmap import WorldMap
+        self.minimap = WorldMap()
+        self.minimap.greyline = False
+        self.minimap.setFixedSize(420, 210)
+        self.minimap.setToolTip("Position du correspondant et trajet depuis votre locator (molette : zoom)")
+        self.minimap.hide()
+        hi.addWidget(self.minimap)
         b = QPushButton("QRZ.com")
         b.setToolTip("Ouvrir la fiche de l'indicatif sur QRZ.com")
         b.clicked.connect(lambda: self.open_web("https://www.qrz.com/db/{}"))
@@ -871,6 +884,7 @@ class LogDock(QDockWidget):
         self._qsl_via = ""
         self._photo = None
         self.lb_photo.hide()
+        self.minimap.hide()
         self.update_flag(txt.strip())
         if txt.strip() and self.ck_autorec.isChecked() and not self.b_qrec.isChecked() and \
                 getattr(self.win, "wf", None) is not None and self.win.wf.running:
@@ -910,6 +924,79 @@ class LogDock(QDockWidget):
         ed.setEnabled(on)
         ed.setPlaceholderText(f"{who} référence {text} : {ACTIVITY_HINT.get(text, '')}".replace(" : ex.", ", ex.")
                               if on else "choisissez d'abord l'activité")
+
+    def update_dept(self, call, info=None):
+        """Département d'une station française (code postal, position de la fiche, ou locator)."""
+        from .departements import for_station
+        info = info or {}
+        code, dname = for_station(call, info.get("zip", ""), info.get("lat"), info.get("lon"),
+                                  self.ed_grid.text().strip() or info.get("grid", ""))
+        txt = f"{code} {dname}" if code else ""
+        if txt and (not self.ed_dept.text() or self.ed_dept.text() == self._auto.get(self.ed_dept)):
+            self.ed_dept.setText(txt)
+            self._auto[self.ed_dept] = txt
+        return code, dname
+
+    def _grid_edited(self, _t):
+        call = self.ed_call.text().strip().upper()
+        if len(self.ed_grid.text().strip()) >= 4 and call:
+            self.update_dept(call)
+            self.update_minimap(call, {})
+
+    def update_minimap(self, call, info):
+        """Petite carte : le correspondant et le trajet (orthodromie) depuis la station."""
+        from .geo import distance_bearing, from_locator
+        pos = None
+        grid = self.ed_grid.text().strip() or info.get("grid", "")
+        if grid:
+            try:
+                pos = from_locator(grid[:6])
+            except ValueError:
+                pos = None
+        if not pos:
+            try:
+                la, lo = float(info.get("lat") or 0), float(info.get("lon") or 0)
+                pos = (la, lo) if (la or lo) else None
+            except ValueError:
+                pos = None
+        if not pos:
+            from . import cty
+            e = cty.lookup(call)
+            pos = (e["lat"], e["lon"]) if e else None
+        if not pos:
+            self.minimap.hide()
+            return
+        st = getattr(self.win, "station", None)
+        m = self.minimap
+        m.set_station(st)
+        from . import departements as DEP
+        code = (self.ed_dept.text().split() or [""])[0].upper()
+        shapes = []
+        if code in DEP._load():
+            shapes.append({"rings": DEP.rings(), "pen": "#40ffffff", "width": 0.5})
+            shapes.append({"rings": DEP.rings(code), "pen": "#ffb300", "width": 1.2, "fill": "#40ffb300"})
+        m.shapes = shapes
+        tip = call
+        if st:
+            d, b = distance_bearing(*st, *pos)
+            tip += f" — {d:.0f} km, cap {b:.0f}°"
+        m.set_layer("qso", [{"lat": pos[0], "lon": pos[1], "label": call, "tip": tip, "color": "#ffb300",
+                             "size": 5, "line": True}])
+        if st:
+            dlat, dlon = abs(st[0] - pos[0]), abs(st[1] - pos[1])
+            if dlon > 180:
+                dlon = 360 - dlon
+            if max(dlat, dlon) > 70:
+                m.show_world()
+            else:
+                span = max(dlat * 2.2, dlon / 1.6 * 2.2, 1.5)
+                clat, clon = (st[0] + pos[0]) / 2, (st[1] + pos[1]) / 2
+                if abs(st[1] - pos[1]) > 180:
+                    clon = ((st[1] + pos[1]) / 2 + 180) % 360 - 180
+                m.show_region(clat, clon, span)
+        else:
+            m.show_region(pos[0], pos[1], 8)
+        m.show()
 
     def update_flag(self, call):
         from .qsl import country_of, flag_pixmap
@@ -987,6 +1074,10 @@ class LogDock(QDockWidget):
                 extra += f" — {d:.0f} km, cap {b:.0f}°"
             except ValueError:
                 pass
+        code, dname = self.update_dept(call, info)
+        if dname:
+            extra = f"{dname} ({code})" + (" — " + extra if extra else "")
+        self.update_minimap(call, info)
         txt = f"{call} : {extra}" if extra else f"{call} trouvé"
         if info.get("photo"):
             self.photos.get(call, info["photo"])
@@ -1030,7 +1121,8 @@ class LogDock(QDockWidget):
     def clear_form(self):
         self._auto.clear()
         self._lookup_timer.stop()
-        for ed in (self.ed_call, self.ed_name, self.ed_qth, self.ed_grid, self.ed_ref, self.ed_comment):
+        self.minimap.hide()
+        for ed in (self.ed_call, self.ed_name, self.ed_qth, self.ed_grid, self.ed_ref, self.ed_comment, self.ed_dept):
             ed.clear()
         self.cb_sig.setCurrentIndex(0)
         self.lb_info.clear()
@@ -1059,6 +1151,7 @@ class LogDock(QDockWidget):
                "rst_sent": self.ed_sent.text(), "rst_rcvd": self.ed_rcvd.text(),
                "name": self.ed_name.text(), "qth": self.ed_qth.text(), "gridsquare": self.ed_grid.text(),
                "comment": self.ed_comment.text(), "qsl_via": self._qsl_via, "country": self._country,
+               "state": (self.ed_dept.text().split() or [""])[0].upper(),
                "tx_pwr": str(st.p.get("pwr", "")) if st else "",
                "station_callsign": self.win.settings.value("mycall", "").upper(),
                "my_gridsquare": self.win.b_loc.text().split()[0] if getattr(self.win, "station", None) else ""}
@@ -1099,7 +1192,7 @@ class LogDock(QDockWidget):
                                        ("moi : " + (r["my_sig"] or "") + " " + r["my_sig_info"]) if r["my_sig_info"] else "")
                            if x.strip())
             vals = [f"{d[6:8]}/{d[4:6]}/{d[:4]}" if len(d) == 8 else d, (r["time_on"] or "")[:4],
-                    r["call"], r["name"], country, fq, r["band"], r["submode"] or r["mode"], r["rst_sent"],
+                    r["call"], r["name"], country, r.get("state") or "", fq, r["band"], r["submode"] or r["mode"], r["rst_sent"],
                     r["rst_rcvd"], "", "", "", "♪" if r.get("audio_file") else "", ref.strip()]
             for c, val in enumerate(vals):
                 self.tbl.setItem(i, c, QTableWidgetItem(val or ""))
@@ -1471,6 +1564,7 @@ class QsoEditDialog(QDialog):
         line("name", "Nom", rec.get("name"), "prénom et nom")
         line("qth", "QTH", rec.get("qth"))
         line("gridsquare", "Locator", rec.get("gridsquare"))
+        line("state", "Département", rec.get("state"), "numéro, ex. 06")
         self.cb_sig, self.cb_mysig = QComboBox(), QComboBox()
         for cb, key in ((self.cb_sig, "sig"), (self.cb_mysig, "my_sig")):
             cb.setEditable(True)
@@ -1544,7 +1638,8 @@ class QsoEditDialog(QDialog):
                "mode": mode, "submode": sub,
                "sig": self.cb_sig.currentText().strip().upper() if g("sig_info") else "",
                "my_sig": self.cb_mysig.currentText().strip().upper() if g("my_sig_info") else ""}
-        for k in ("rst_sent", "rst_rcvd", "name", "qth", "gridsquare", "sig_info", "my_sig_info", "qsl_via", "comment"):
+        for k in ("rst_sent", "rst_rcvd", "name", "qth", "gridsquare", "sig_info", "my_sig_info", "qsl_via", "comment",
+                  "state"):
             rec[k] = g(k).upper() if k in ("gridsquare", "sig_info", "my_sig_info", "qsl_via") and k != "gridsquare" else g(k)
         if rec["gridsquare"]:
             gs = rec["gridsquare"]
