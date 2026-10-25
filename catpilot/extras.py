@@ -45,6 +45,16 @@ class Speaker:
                 return
             except Exception:
                 pass
+        if os.name != "nt":
+            import shutil
+            for prog, args in (("spd-say", ["-l", "fr"]), ("espeak-ng", ["-v", "fr"]), ("espeak", ["-v", "fr"])):
+                if shutil.which(prog):
+                    try:
+                        subprocess.Popen([prog] + args + [text])
+                    except Exception:
+                        pass
+                    return
+            return
         if os.name == "nt":
             safe = text.replace("'", " ").replace('"', " ")
             cmd = ("Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "

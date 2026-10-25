@@ -23,7 +23,7 @@ from . import __version__
 REPO = "F4JCF/catpilot"
 API = f"https://api.github.com/repos/{REPO}/releases/latest"
 PAGE = f"https://github.com/{REPO}/releases/latest"
-ASSET = "CATPilot.exe"
+ASSET = "CATPilot.exe" if sys.platform == "win32" else "CATPilot-x86_64.AppImage"
 HEADERS = {"User-Agent": f"CATPilot/{__version__}", "Accept": "application/vnd.github+json"}
 
 
@@ -35,9 +35,20 @@ def is_newer(remote, local=__version__):
     return parse_version(remote) > parse_version(local)
 
 
+def appimage_path():
+    """Chemin du fichier AppImage en cours d'exécution (Linux), ou ""."""
+    p = os.environ.get("APPIMAGE", "")
+    return p if p and os.path.isfile(p) else ""
+
+
 def can_self_update():
-    """Remplacement automatique possible seulement pour l'exécutable Windows."""
-    return getattr(sys, "frozen", False) and sys.platform == "win32"
+    """Remplacement automatique : CATPilot.exe sous Windows, ou l'AppImage sous Linux (si modifiable)."""
+    if not getattr(sys, "frozen", False):
+        return False
+    if sys.platform == "win32":
+        return True
+    p = appimage_path()
+    return bool(p) and os.access(os.path.dirname(p), os.W_OK)
 
 
 class Updater(QObject):
@@ -82,7 +93,10 @@ class Updater(QObject):
 
     def _download(self, info):
         try:
-            dest = os.path.join(tempfile.gettempdir(), f"CATPilot_{info['version']}.exe")
+            ext = ".exe" if sys.platform == "win32" else ".AppImage"
+            d = os.path.dirname(appimage_path()) if appimage_path() else tempfile.gettempdir()
+            dest = os.path.join(d, f".CATPilot_{info['version']}{ext}.part" if appimage_path()
+                                else f"CATPilot_{info['version']}{ext}")
             req = urllib.request.Request(info["url"], headers={"User-Agent": HEADERS["User-Agent"]})
             h = hashlib.sha256()
             with urllib.request.urlopen(req, timeout=30) as r, open(dest, "wb") as f:
@@ -131,8 +145,17 @@ def spawn_detached(cmd):
         subprocess.Popen(cmd, env=clean_env(), creationflags=base, close_fds=True)
 
 
+def _sh_wait():
+    return f"while kill -0 {os.getpid()} 2>/dev/null; do sleep 0.5; done\n"
+
+
 def restart():
     """Relance le logiciel (après un changement de langue, par exemple)."""
+    if sys.platform != "win32":
+        target = appimage_path() or (sys.executable if getattr(sys, "frozen", False) else "")
+        cmd = f'"{target}"' if target else f'"{sys.executable}" ' + " ".join(f'"{a}"' for a in sys.argv)
+        spawn_detached(["sh", "-c", _sh_wait() + f"exec {cmd}"])
+        return
     if getattr(sys, "frozen", False):
         exe = sys.executable
         bat = os.path.join(tempfile.gettempdir(), "catpilot_relance.bat")
@@ -156,6 +179,12 @@ def _wait_lines():
 
 def install_and_restart(new_exe):
     """Lance le script qui attend la fermeture, remplace l'exécutable et le relance."""
+    if sys.platform != "win32":
+        target = appimage_path()
+        os.chmod(new_exe, 0o755)
+        spawn_detached(["sh", "-c", _sh_wait() + f'mv -f "{new_exe}" "{target}" && chmod +x "{target}"\n'
+                        f'exec "{target}"'])
+        return
     exe = sys.executable
     bat = os.path.join(tempfile.gettempdir(), "catpilot_maj.bat")
     with open(bat, "w", encoding="mbcs" if sys.platform == "win32" else "utf-8") as f:

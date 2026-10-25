@@ -52,7 +52,9 @@ class UploadDialog(QDialog):
                 if pwd:
                     ed.setEchoMode(QLineEdit.Password)
                 if key == "tqsl_path":
-                    ed.setPlaceholderText(find_tqsl() or "C:\\Program Files (x86)\\TrustedQSL\\tqsl.exe")
+                    import sys
+                    ed.setPlaceholderText(find_tqsl() or ("C:\\Program Files (x86)\\TrustedQSL\\tqsl.exe"
+                                                          if sys.platform == "win32" else "/usr/bin/tqsl"))
                 f.addRow(label, ed)
                 self.edits[key] = ed
             t = QLabel(self.HELP[svc])

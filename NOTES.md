@@ -1,4 +1,6 @@
-Nouveautés de la 0.23.3 :
-- DX cluster beaucoup plus fluide : la liste des spots n'est plus redessinée à chaque spot reçu, mais regroupée (moins d'une fois par seconde), seulement quand le panneau est affiché, et limitée aux 200 derniers spots. Le logiciel ne se fige plus avec un cluster très actif.
-- Alertes du cluster : une seule alerte par indicatif et par heure ; son et voix au plus toutes les 15 secondes. Pas d'alerte « nouveau pays » quand le carnet est vide.
-- Carnet : affichage de la liste plus rapide.
+Nouveautés de la 0.24.0 : CAT Pilot fonctionne aussi sous Linux.
+- Nouveau fichier CATPilot-x86_64.AppImage : à rendre exécutable puis à lancer d'un double-clic, sans installation (Ubuntu 22.04 et suivantes, Debian 12, Linux Mint 21, Fedora…, 64 bits). Aussi en archive CATPilot-linux-x86_64.tar.gz.
+- Sous Linux : ports /dev/ttyUSB0 (Enhanced, CAT) et /dev/ttyUSB1 (Standard, CW/PTT) reconnus ; message d'aide si l'accès au port est refusé (groupe « dialout ») ou si le port est occupé (ModemManager).
+- Son, chute d'eau, modes numériques (FT8/FT4, RTTY, PSK31, SSTV), SDR RTL inclus. Annonces vocales par speech-dispatcher ou espeak-ng. TQSL (LoTW) trouvé dans /usr/bin.
+- Mise à jour automatique de l'AppImage depuis le menu « Mise à jour ».
+- Windows : rien ne change.

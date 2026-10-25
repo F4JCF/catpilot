@@ -914,9 +914,20 @@ class MainWindow(QMainWindow):
         cur = self.cb_port.currentData()
         self.cb_port.clear()
         enhanced = -1
-        for p in sorted(serial.tools.list_ports.comports(), key=lambda p: p.device):
-            self.cb_port.addItem(f"{p.device} — {p.description}", p.device)
-            if "enhanced" in p.description.lower():
+        ports = sorted(serial.tools.list_ports.comports(), key=lambda p: p.device)
+        if sys.platform != "win32":       # Linux : on ne garde que les vrais ports (USB, ACM, série)
+            ports = [p for p in ports if p.vid or "USB" in p.device or "ACM" in p.device] or ports
+        for p in ports:
+            desc = p.description or ""
+            iface = (getattr(p, "interface", "") or "")
+            # Linux : le CP2105 du FT-991A donne deux ttyUSB ; l'interface 0 est le port « Enhanced » (CAT)
+            if sys.platform != "win32" and p.vid == 0x10C4 and p.pid == 0xEA70 and "enhanced" not in (desc + iface).lower():
+                loc = getattr(p, "location", "") or ""
+                iface = iface or ("Enhanced Com Port (CAT)" if loc.endswith(".0") else
+                                  "Standard Com Port (CW/PTT)" if loc.endswith(".1") else "")
+            label = desc if not iface or iface.lower() in desc.lower() else f"{desc} — {iface}"
+            self.cb_port.addItem(f"{p.device} — {label}", p.device)
+            if "enhanced" in (desc + iface).lower():
                 enhanced = self.cb_port.count() - 1
         i = self.cb_port.findData(cur)
         if i >= 0:
@@ -977,9 +988,16 @@ class MainWindow(QMainWindow):
             if getattr(cls, "is_remote", False):
                 QMessageBox.critical(self, "Connexion impossible", f"La station {port} n'a pas pu être jointe.\n\n{e}")
                 return
+            hint = "Vérifiez qu'aucun autre logiciel ne l'utilise déjà."
+            if sys.platform.startswith("linux") and ("ermission" in str(e) or "Errno 13" in str(e)):
+                hint = ("Sous Linux, votre compte doit faire partie du groupe « dialout » pour utiliser les ports "
+                        "série. Dans un terminal :\n\n    sudo usermod -aG dialout $USER\n\npuis fermez la session "
+                        "et rouvrez-la (ou redémarrez le PC).")
+            elif sys.platform.startswith("linux") and ("busy" in str(e).lower() or "Errno 16" in str(e)):
+                hint = ("Le port est occupé : un autre logiciel (ou ModemManager) l'utilise. Fermez-le, ou "
+                        "désinstallez ModemManager :  sudo apt remove modemmanager")
             QMessageBox.critical(self, "Connexion impossible",
-                                 f"Le port {port} n'a pas pu être ouvert.\n\n{e}\n\n"
-                                 "Vérifiez qu'aucun autre logiciel ne l'utilise déjà.")
+                                 f"Le port {port} n'a pas pu être ouvert.\n\n{e}\n\n{hint}")
 
     def on_status(self, ok, msg):
         lost = not ok and msg.startswith("Liaison perdue")
@@ -2160,8 +2178,8 @@ class MainWindow(QMainWindow):
         box.setInformativeText((notes + "\n\n" if notes else "") +
                                ("Le logiciel sera fermé, mis à jour puis relancé automatiquement."
                                 if can_self_update() else
-                                "Mise à jour automatique possible uniquement avec CATPilot.exe : "
-                                "la page de téléchargement va s'ouvrir."))
+                                "Mise à jour automatique possible uniquement avec CATPilot.exe (Windows) ou "
+                                "l'AppImage (Linux) : la page de téléchargement va s'ouvrir."))
         b_now = box.addButton("Mettre à jour maintenant", QMessageBox.AcceptRole)
         b_later = box.addButton("Plus tard", QMessageBox.RejectRole)
         b_skip = box.addButton("Ignorer cette version", QMessageBox.DestructiveRole) if not manual else None

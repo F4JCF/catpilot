@@ -88,6 +88,11 @@ def run(path):
             assert iso == want and qsl.flag_path(iso), (call, iso)
         return f"{len(qsl.dxcc_table())} pays, drapeaux présents"
     check("Drapeaux", flags)
+
+    def son():
+        import sounddevice as sd
+        return sd.get_portaudio_version()[1]
+    check("Son (PortAudio)", son)
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     return 0 if ok else 1

@@ -1,6 +1,6 @@
 # CAT Pilot 0.13 — Yaesu et Icom
 
-Logiciel de pilotage CAT des Yaesu FT-991A, FT-891, FT-710, FTDX10 et des Icom IC-705, IC-7300, IC-9700 sous Windows, avec partage du CAT
+Logiciel de pilotage CAT des Yaesu FT-991A, FT-891, FT-710, FTDX10 et des Icom IC-705, IC-7300, IC-9700 sous Windows et Linux, avec partage du CAT
 vers WSJT-X, JTDX, Log4OM, N1MM… grâce à un serveur compatible rigctld.
 
 ## Installation
@@ -11,6 +11,21 @@ vers WSJT-X, JTDX, Log4OM, N1MM… grâce à un serveur compatible rigctld.
   dans le menu Démarrer, et désinstallation propre.
 - **Sans installation** : `CATPilot.exe` de la même page, à lancer tel quel.
 - Ensuite, les mises à jour se font depuis le logiciel (menu « Mise à jour »).
+
+## Linux
+
+- Télécharger `CATPilot-x86_64.AppImage` dans la dernière version publiée, le rendre
+  exécutable (clic droit > Propriétés > « Autoriser l'exécution », ou
+  `chmod +x CATPilot-x86_64.AppImage`), puis double-cliquer dessus. Aucune installation.
+  Fonctionne sur Ubuntu 22.04 et suivantes, Debian 12, Linux Mint 21, Fedora 37… (64 bits).
+- Une seule fois, autoriser l'accès aux ports série, puis fermer la session et la rouvrir :
+  `sudo usermod -aG dialout $USER`
+- Le FT-991A apparaît en `/dev/ttyUSB0` (Enhanced, CAT) et `/dev/ttyUSB1` (Standard, CW/PTT).
+  Si le port reste « occupé », désinstaller ModemManager : `sudo apt remove modemmanager`.
+- Son : choisir « USB Audio CODEC » (ou « pulse » / « default ») pour la chute d'eau.
+  Annonces vocales : installer `speech-dispatcher` ou `espeak-ng`.
+- Sans AppImage : `CATPilot-linux-x86_64.tar.gz`, à décompresser, puis lancer `CATPilot/CATPilot`.
+- Les mises à jour se font aussi depuis le menu « Mise à jour » (AppImage).
 
 ## Réglage du FT-991A
 

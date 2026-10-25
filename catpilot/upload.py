@@ -21,10 +21,11 @@ UA = {"User-Agent": f"CATPilot/{__version__}"}
 
 
 def find_tqsl(path=""):
-    for p in [path] + TQSL_PATHS:
+    import shutil
+    for p in [path] + TQSL_PATHS + ["/usr/bin/tqsl", "/usr/local/bin/tqsl"]:
         if p and os.path.exists(p):
             return p
-    return ""
+    return shutil.which("tqsl") or ""
 
 
 def _post(url, data, timeout=30):
