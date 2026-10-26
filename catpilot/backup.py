@@ -6,6 +6,7 @@ le sous-dossier « historique ». Une fois par jour au démarrage, ou à la dema
 """
 import base64
 import datetime
+import hashlib
 import json
 import os
 import shutil
@@ -38,6 +39,107 @@ def dav_base(url, user, folder):
     for part in [p for p in folder.strip("/").split("/") if p]:
         url += "/" + urllib.parse.quote(part)
     return url
+
+
+def collect_files(win, tmp):
+    """Prépare les fichiers à envoyer (copies cohérentes des bases)."""
+    out = []
+    log = win.log
+    p = os.path.join(tmp, "carnet.sqlite")
+    with log.lock:
+        dst = sqlite3.connect(p)
+        log.db.backup(dst)
+        dst.close()
+    out.append(("carnet.sqlite", p))
+    p = os.path.join(tmp, "carnet.adi")
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(adif.write(log.export_records(log.query()), "CAT Pilot", __version__))
+    out.append(("carnet.adi", p))
+    mc = getattr(win, "mc", None)
+    if mc:
+        p = os.path.join(tmp, "main_courante.sqlite")
+        with mc.journal.lock:
+            dst = sqlite3.connect(p)
+            mc.journal.db.backup(dst)
+            dst.close()
+        out.append(("main_courante.sqlite", p))
+    cfg = {}
+    for k in win.settings.allKeys():
+        if any(x in k.lower() for x in SECRET):
+            continue
+        v = win.settings.value(k)
+        if isinstance(v, (str, int, float, bool)) or v is None:
+            cfg[k] = v
+    p = os.path.join(tmp, "reglages.json")
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=1)
+    out.append(("reglages.json", p))
+    return out
+
+
+# --- sauvegarde locale à la fermeture ----------------------------------------------------
+LOCAL_KEEP = 30                              # nombre de sauvegardes locales conservées
+# réglages qui bougent à chaque session sans être des « modifications » (position des fenêtres…)
+VOLATILE = ("bk_close_", "nc_last", "dock_state", "geometry", "upd_", "last_")
+
+
+def local_dir():
+    d = os.path.join(data_dir(), "Sauvegardes")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _digest(files):
+    """Empreinte du contenu (carnet, main courante, réglages) pour éviter les copies identiques."""
+    h = hashlib.sha256()
+    for name, path in files:
+        if name == "carnet.sqlite" or name == "main_courante.sqlite":
+            con = sqlite3.connect(path)
+            try:
+                for (sql,) in con.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"):
+                    h.update(sql.encode())
+                    for row in con.execute(f'SELECT * FROM "{sql}"'):
+                        h.update(repr(row).encode())
+            finally:
+                con.close()
+        elif name == "reglages.json":
+            with open(path, encoding="utf-8") as f:
+                cfg = json.load(f)
+            cfg = {k: v for k, v in cfg.items() if not k.startswith(VOLATILE)}
+            h.update(json.dumps(cfg, sort_keys=True, ensure_ascii=False).encode())
+    return h.hexdigest()
+
+
+def local_backup(win, keep=LOCAL_KEEP, force=False):
+    """Copie datée du carnet (SQLite + ADIF), de la main courante et des réglages dans
+    Documents/…/Sauvegardes/AAAA-MM-JJ_HHhMMmSS. Rien n'est copié si rien n'a changé depuis
+    la dernière sauvegarde. Les plus anciennes au-delà de « keep » sont supprimées.
+    Renvoie (dossier ou None, message)."""
+    s = win.settings
+    tmp = tempfile.mkdtemp(prefix="catpilot_loc_")
+    try:
+        files = collect_files(win, tmp)
+        dig = _digest(files)
+        root = local_dir()
+        prev = s.value("bk_close_hash", "")
+        last = s.value("bk_close_dir", "")
+        if not force and dig == prev and last and os.path.isdir(os.path.join(root, last)):
+            return None, "Sauvegarde du carnet : aucune modification depuis la dernière"
+        name = datetime.datetime.now().strftime("%Y-%m-%d_%Hh%Mm%S")
+        dst = os.path.join(root, name)
+        os.makedirs(dst, exist_ok=True)
+        for fname, path in files:
+            shutil.copy2(path, os.path.join(dst, fname))
+        s.setValue("bk_close_hash", dig)
+        s.setValue("bk_close_dir", name)
+        s.sync()
+        dirs = sorted(d for d in os.listdir(root)
+                      if os.path.isdir(os.path.join(root, d)) and d[:4].isdigit() and d[4:5] == "-")
+        for old in dirs[:-keep] if keep > 0 else []:
+            shutil.rmtree(os.path.join(root, old), ignore_errors=True)
+        return dst, f"Carnet sauvegardé dans {dst}"
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 class Backup(QObject):
@@ -82,39 +184,7 @@ class Backup(QObject):
             raise RuntimeError(f"création du dossier refusée (code {code})")
 
     def _files(self, tmp):
-        """Prépare les fichiers à envoyer (copies cohérentes des bases)."""
-        out = []
-        log = self.win.log
-        p = os.path.join(tmp, "carnet.sqlite")
-        with log.lock:
-            dst = sqlite3.connect(p)
-            log.db.backup(dst)
-            dst.close()
-        out.append(("carnet.sqlite", p))
-        p = os.path.join(tmp, "carnet.adi")
-        with open(p, "w", encoding="utf-8") as f:
-            f.write(adif.write(log.export_records(log.query()), "CAT Pilot", __version__))
-        out.append(("carnet.adi", p))
-        mc = getattr(self.win, "mc", None)
-        if mc:
-            p = os.path.join(tmp, "main_courante.sqlite")
-            with mc.journal.lock:
-                dst = sqlite3.connect(p)
-                mc.journal.db.backup(dst)
-                dst.close()
-            out.append(("main_courante.sqlite", p))
-        cfg = {}
-        for k in self.s.allKeys():
-            if any(x in k.lower() for x in SECRET):
-                continue
-            v = self.s.value(k)
-            if isinstance(v, (str, int, float, bool)) or v is None:
-                cfg[k] = v
-        p = os.path.join(tmp, "reglages.json")
-        with open(p, "w", encoding="utf-8") as f:
-            json.dump(cfg, f, ensure_ascii=False, indent=1)
-        out.append(("reglages.json", p))
-        return out
+        return collect_files(self.win, tmp)
 
     def _run(self):
         tmp = tempfile.mkdtemp(prefix="catpilot_bk_")

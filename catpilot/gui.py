@@ -929,6 +929,14 @@ class MainWindow(QMainWindow):
                     pass
         if self.server:
             self.server.stop()
+        if s.value("bk_on_close", "true") in (True, "true"):
+            self.statusBar().showMessage("Sauvegarde du carnet…")
+            QApplication.processEvents()
+            try:
+                from .backup import local_backup
+                local_backup(self)
+            except Exception as ex:          # la fermeture ne doit jamais être bloquée
+                print(f"sauvegarde à la fermeture impossible : {ex}", file=sys.stderr)
         super().closeEvent(e)
 
     # --- liaison -------------------------------------------------------------------
@@ -1344,6 +1352,18 @@ class MainWindow(QMainWindow):
             a = QAction(label, self)
             a.triggered.connect(slot)
             cm.addAction(a)
+        cm.addSeparator()
+        self.act_close_bk = QAction("Sauvegarder le carnet à la fermeture", self, checkable=True)
+        self.act_close_bk.setChecked(self.settings.value("bk_on_close", "true") in (True, "true"))
+        self.act_close_bk.toggled.connect(
+            lambda on: self.settings.setValue("bk_on_close", "true" if on else "false"))
+        cm.addAction(self.act_close_bk)
+        a = QAction("Sauvegarder le carnet maintenant", self)
+        a.triggered.connect(self.local_backup_now)
+        cm.addAction(a)
+        a = QAction("Ouvrir le dossier des sauvegardes du carnet", self)
+        a.triggered.connect(self.open_local_backups)
+        cm.addAction(a)
         h = mb.addMenu("Aide")
         a = QAction("Raccourcis clavier", self)
         a.triggered.connect(self.show_shortcuts)
@@ -1527,6 +1547,20 @@ class MainWindow(QMainWindow):
             self.ctrl.disconnect_rig(power_off=True)
 
     # --- sauvegarde des menus -------------------------------------------------------------------------
+    def local_backup_now(self):
+        from .backup import local_backup
+        try:
+            _d, msg = local_backup(self, force=True)
+        except Exception as ex:
+            msg = f"Sauvegarde du carnet impossible : {ex}"
+        self.statusBar().showMessage(msg, 10000)
+
+    def open_local_backups(self):
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        from .backup import local_dir
+        QDesktopServices.openUrl(QUrl.fromLocalFile(local_dir()))
+
     def open_backup_dir(self):
         from PySide6.QtCore import QUrl
         from PySide6.QtGui import QDesktopServices
