@@ -90,6 +90,22 @@ class Log(QObject):
             self.added.emit(qid)
         return qid
 
+    def add_many(self, recs):
+        """Ajoute une liste de QSO en une seule fois (import). Renvoie leurs identifiants."""
+        ids = []
+        with self.lock:
+            for rec in recs:
+                rec = {k: (str(v).strip() if v is not None else "") for k, v in rec.items() if k in FIELDS}
+                rec["call"] = rec.get("call", "").upper()
+                if not rec.get("band") and rec.get("freq"):
+                    rec["band"] = band_of_mhz(rec["freq"])
+                keys = list(rec)
+                cur = self.db.execute(f"INSERT INTO qso ({', '.join(keys)}) VALUES ({', '.join('?' * len(keys))})",
+                                      [rec[k] for k in keys])
+                ids.append(cur.lastrowid)
+            self.db.commit()
+        return ids
+
     def pending(self, svc, ids=None):
         """QSO pas encore envoyés à ce service (QRZ, eQSL, Club Log, LoTW)."""
         col = f"up_{svc}"
@@ -1468,25 +1484,49 @@ class LogDock(QDockWidget):
             return
         with open(path, encoding="utf-8", errors="replace") as f:
             recs = adif.parse(f.read())
-        n = dup = 0
-        new_ids = []
+        recs = [r for r in recs if r.get("call")]
         for r in recs:
-            if not r.get("call"):
-                continue
+            r["call"] = r["call"].strip().upper()
             if not r.get("band"):
                 r["band"] = band_of_mhz(r.get("freq"))
-            if self.log.is_dupe(r):
-                dup += 1
-                continue
-            new_ids.append(self.log.add(r, notify=False))
-            n += 1
+        if not recs:
+            QMessageBox.information(self, "Import ADIF", "Aucun QSO trouvé dans ce fichier.")
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle("Import ADIF")
+        box.setText(f"{len(recs)} QSO dans « {os.path.basename(path)} ».\n\n"
+                    "Ce fichier a-t-il déjà été contrôlé (pas de doublons avec le carnet) ?")
+        box.setInformativeText("Oui : tout est importé tel quel, sans recherche de doublons.\n"
+                               "Non : les doublons sont mis de côté et présentés pour validation.")
+        b_yes = box.addButton("Oui, déjà contrôlé", QMessageBox.YesRole)
+        b_no = box.addButton("Non, vérifier les doublons", QMessageBox.NoRole)
+        box.addButton("Annuler", QMessageBox.RejectRole)
+        box.setDefaultButton(b_no)
+        box.exec()
+        if box.clickedButton() not in (b_yes, b_no):
+            return
+        dups = []
+        if box.clickedButton() is b_yes:
+            keep = recs
+        else:
+            keep, dups = find_duplicates(self.log, recs)
+            if dups:
+                d = DuplicatesDialog(self, dups, len(keep))
+                if d.exec() != QDialog.Accepted:
+                    return
+                keep = keep + d.chosen()
+        new_ids = self.log.add_many(keep)
+        n = len(new_ids)
         if new_ids and QMessageBox.question(
                 self, "Import ADIF", f"{n} QSO importés. Faut-il aussi les envoyer aux carnets en ligne "
                 "(QRZ.com, eQSL, Club Log, LoTW) lors du prochain envoi ?\n\n"
                 "Répondez Non s'ils y sont déjà.") != QMessageBox.Yes:
             self.log.mark_all_uploaded(new_ids)
         self.log.changed.emit()
-        QMessageBox.information(self, "Import ADIF", f"{n} QSO importés, {dup} doublons ignorés.")
+        skipped = len(recs) - n
+        QMessageBox.information(self, "Import ADIF", f"{n} QSO importés"
+                                + (f", {skipped} doublon{'s' if skipped > 1 else ''} écarté{'s' if skipped > 1 else ''}."
+                                   if skipped else "."))
 
     def _save_adif(self, rows, default):
         path, _ = QFileDialog.getSaveFileName(self, "Exporter en ADIF", os.path.join(data_dir(), default),
@@ -1601,6 +1641,110 @@ class HamQTHDialog(QDialog):
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
         f.addRow(bb)
+
+
+def _qso_time(r):
+    try:
+        return datetime.datetime.strptime((r.get("qso_date") or "") + ((r.get("time_on") or "") + "0000")[:4],
+                                          "%Y%m%d%H%M")
+    except ValueError:
+        return None
+
+
+def _mode_key(r):
+    m = (r.get("submode") or r.get("mode") or "").upper()
+    return {"USB": "SSB", "LSB": "SSB"}.get(m, m)
+
+
+def find_duplicates(log, recs, minutes=3):
+    """Sépare les QSO à importer en (nouveaux, doublons). Doublon : même indicatif, même bande, même mode,
+    à quelques minutes près, déjà dans le carnet ou déjà plus haut dans le fichier."""
+    index = {}
+    with log.lock:
+        rows = log.db.execute("SELECT id, call, qso_date, time_on, band, mode, submode, freq, rst_sent, rst_rcvd "
+                              "FROM qso").fetchall()
+    keys = ["id", "call", "qso_date", "time_on", "band", "mode", "submode", "freq", "rst_sent", "rst_rcvd"]
+    for row in rows:
+        r = dict(zip(keys, row))
+        index.setdefault(((r["call"] or "").upper(), (r["band"] or "").lower()), []).append(r)
+    keep, dups = [], []
+    for r in recs:
+        t = _qso_time(r)
+        k = ((r.get("call") or "").upper(), (r.get("band") or "").lower())
+        match = None
+        if t:
+            for o in index.get(k, []):
+                t2 = _qso_time(o)
+                if t2 and abs((t - t2).total_seconds()) <= minutes * 60 and _mode_key(o) == _mode_key(r):
+                    match = o
+                    break
+        if match:
+            dups.append((r, match))
+        else:
+            keep.append(r)
+            index.setdefault(k, []).append(dict(r, id=None))     # doublons à l'intérieur du fichier
+    return keep, dups
+
+
+class DuplicatesDialog(QDialog):
+    """Doublons trouvés à l'import : l'utilisateur coche ceux qu'il veut importer quand même."""
+    COLS = ["Importer", "Indicatif", "Date", "UTC", "Bande", "Mode", "Fréquence", "RST", "Déjà présent"]
+
+    def __init__(self, parent, dups, n_new):
+        super().__init__(parent)
+        from PySide6.QtWidgets import QCheckBox
+        self.dups = dups
+        self.setWindowTitle("Import ADIF : doublons à valider")
+        self.resize(980, 520)
+        v = QVBoxLayout(self)
+        t = QLabel(f"{n_new} QSO nouveaux seront importés. Les {len(dups)} QSO ci-dessous ressemblent à des QSO "
+                   "déjà présents (même indicatif, bande et mode, à 3 minutes près) : ils sont écartés, sauf ceux "
+                   "que vous cochez.")
+        t.setWordWrap(True)
+        v.addWidget(t)
+        self.tbl = QTableWidget(len(dups), len(self.COLS))
+        self.tbl.setHorizontalHeaderLabels(self.COLS)
+        self.tbl.verticalHeader().setVisible(False)
+        self.tbl.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.tbl.setSelectionBehavior(QAbstractItemView.SelectRows)
+        fmt_d = lambda d: f"{d[6:8]}/{d[4:6]}/{d[:4]}" if d and len(d) == 8 else (d or "")
+        self.checks = []
+        for i, (r, o) in enumerate(dups):
+            ck = QCheckBox()
+            box = QWidget()
+            hb = QHBoxLayout(box)
+            hb.setContentsMargins(6, 0, 0, 0)
+            hb.addWidget(ck)
+            self.tbl.setCellWidget(i, 0, box)
+            self.checks.append(ck)
+            src = "dans ce fichier" if o.get("id") is None else \
+                f"carnet : {fmt_d(o.get('qso_date'))} {(o.get('time_on') or '')[:4]} {o.get('band') or ''} " \
+                f"{o.get('submode') or o.get('mode') or ''}"
+            vals = [r.get("call", ""), fmt_d(r.get("qso_date")), (r.get("time_on") or "")[:4], r.get("band", ""),
+                    r.get("submode") or r.get("mode") or "", r.get("freq", ""),
+                    f"{r.get('rst_sent') or ''}/{r.get('rst_rcvd') or ''}", src]
+            for c, val in enumerate(vals, start=1):
+                self.tbl.setItem(i, c, QTableWidgetItem(val or ""))
+        self.tbl.resizeColumnsToContents()
+        self.tbl.horizontalHeader().setStretchLastSection(True)
+        v.addWidget(self.tbl, 1)
+        h = QHBoxLayout()
+        for label, on in (("Tout cocher", True), ("Tout décocher", False)):
+            b = QPushButton(label)
+            b.clicked.connect(lambda _c=False, val=on: [c.setChecked(val) for c in self.checks])
+            h.addWidget(b)
+        h.addStretch()
+        b = QPushButton("Annuler l'import")
+        b.clicked.connect(self.reject)
+        h.addWidget(b)
+        b = QPushButton("Importer (nouveaux + cochés)")
+        b.setDefault(True)
+        b.clicked.connect(self.accept)
+        h.addWidget(b)
+        v.addLayout(h)
+
+    def chosen(self):
+        return [r for (r, _o), ck in zip(self.dups, self.checks) if ck.isChecked()]
 
 
 class QsoEditDialog(QDialog):

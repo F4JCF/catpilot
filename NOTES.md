@@ -1,4 +1,5 @@
-Nouveautés de la 0.25.1 (carnet) :
-- Locator manquant : quand QRZ.com (sans abonnement), HamQTH ou QRZCQ ne donnent pas le locator, CAT Pilot le lit sur la page publique de QRZCQ.com (locator, latitude, longitude), sans compte.
-- En dernier recours, pour une station française, le locator est celui du centre de sa commune (d'après le QTH, service public geo.api.gouv.fr), avec la mention « locator du centre de la commune ».
-- Le département est alors trouvé d'après ce locator, et la petite carte place correctement le correspondant.
+Nouveautés de la 0.25.2 (import ADIF) :
+- À l'import d'un fichier ADIF, CAT Pilot demande si le fichier a déjà été contrôlé.
+  - « Oui » : tout est importé tel quel, sans recherche de doublons.
+  - « Non » : les doublons (même indicatif, bande et mode à 3 minutes près, déjà dans le carnet ou répétés dans le fichier) sont écartés et présentés dans une fenêtre : cochez ceux à importer quand même, ou annulez l'import.
+- Import beaucoup plus rapide pour les gros fichiers.
