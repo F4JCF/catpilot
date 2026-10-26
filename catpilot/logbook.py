@@ -325,6 +325,25 @@ class HamQTH(QObject):
                     "photo": f("picture") or f("image") or f("qslpic"), "zip": f("zip"), "src": "QRZCQ"}, None
         return None, None
 
+    def _qrzcq_page(self, call):
+        """Données publiques de la page www.qrzcq.com/call/INDICATIF (locator, latitude, longitude, prénom)."""
+        base = call.split("/")
+        main = max(base, key=len)
+        html = self._open(f"https://www.qrzcq.com/call/{urllib.parse.quote(main)}").decode("utf-8", "replace")
+        txt = re.sub(r"<[^>]+>", " ", html)
+        txt = re.sub(r"&nbsp;|&#160;", " ", txt)
+        txt = re.sub(r"\s+", " ", txt)
+        out = {}
+        m = re.search(r"Locator:?\s*([A-R]{2}[0-9]{2}(?:[A-Xa-x]{2})?)\b", txt, re.I)
+        if m:
+            g = m.group(1)
+            out["grid"] = g[:2].upper() + g[2:4] + g[4:].lower()
+        for key, lab in (("lat", "Latitude"), ("lon", "Longitude")):
+            m = re.search(lab + r":?\s*(-?[0-9]+(?:\.[0-9]+)?)", txt, re.I)
+            if m:
+                out[key] = m.group(1)
+        return out
+
     def _callook(self, call):
         if not re.match(r"^(A[A-L]|[KNW])[A-Z]?\d[A-Z]{1,3}$", call.split("/")[0]):
             return None, None
@@ -354,6 +373,30 @@ class HamQTH(QObject):
                         info[k] = v
             if all(info.get(k) for k in ("name", "qth", "grid")):
                 break
+        if not info.get("grid") and not (info.get("lat") and info.get("lon")):
+            # fiche publique de QRZCQ.com (sans compte) : locator et coordonnées
+            try:
+                got = self._qrzcq_page(call)
+            except Exception:
+                got = None
+            if got:
+                sources.append("QRZCQ (page publique)")
+                for k, v in got.items():
+                    if v and not info.get(k):
+                        info[k] = v
+        if not info.get("grid") and not (info.get("lat") and info.get("lon")) and not info.get("zip") \
+                and info.get("qth"):
+            # station française sans position : centre de sa commune (geo.api.gouv.fr)
+            try:
+                from . import cty
+                ent = cty.dxcc(call)
+                if ent and ent["prefix"] in ("F", "TK"):
+                    got = commune_position(info["qth"])
+                    if got:
+                        info["lat"], info["lon"], info["zip"] = got["lat"], got["lon"], got.get("zip", "")
+                        info["grid_note"] = f"locator du centre de la commune ({got['nom']})"
+            except Exception:
+                pass
         if not info.get("grid") and info.get("lat") and info.get("lon"):
             try:
                 from .geo import to_locator
@@ -447,6 +490,34 @@ def describe_mycall(call):
     except Exception:
         pass
     return " · ".join(notes)
+
+
+_COMMUNES = {}
+
+
+def commune_position(qth):
+    """Centre et code postal d'une commune française d'après son nom (geo.api.gouv.fr ; la plus peuplée)."""
+    import json
+    name = re.split(r"[,(/]", qth or "")[0].strip()
+    if len(name) < 2:
+        return None
+    key = name.upper()
+    if key in _COMMUNES:
+        return _COMMUNES[key]
+    url = ("https://geo.api.gouv.fr/communes?" + urllib.parse.urlencode(
+        {"nom": name, "fields": "nom,centre,codesPostaux,codeDepartement", "boost": "population", "limit": "5"}))
+    req = urllib.request.Request(url, headers={"User-Agent": f"CATPilot/{__version__}"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        data = json.loads(r.read().decode("utf-8"))
+    norm = lambda t: re.sub(r"[^A-Z]", "", t.upper().replace("SAINT", "ST"))
+    best = next((c for c in data if norm(c.get("nom", "")) == norm(name)), data[0] if data else None)
+    res = None
+    if best and best.get("centre"):
+        lon, lat = best["centre"]["coordinates"]
+        res = {"lat": lat, "lon": lon, "nom": best.get("nom", ""), "dept": best.get("codeDepartement", ""),
+               "zip": (best.get("codesPostaux") or [""])[0]}
+    _COMMUNES[key] = res
+    return res
 
 
 def full_name(name):
@@ -1101,6 +1172,8 @@ class LogDock(QDockWidget):
             txt += "\n" + " · ".join(qsl)
         if info.get("sources"):
             txt += f"  [{info['sources']}]"
+        if info.get("grid_note"):
+            txt += f"\n{info['grid_note']}"
         if info.get("hint"):
             txt += f"\n{info['hint']}"
         self.lb_info.setText(txt)
