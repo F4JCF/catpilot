@@ -1,6 +1,5 @@
-Nouveautés de la 0.25.4 (sauvegarde du carnet) :
-- À chaque fermeture du logiciel, le carnet de trafic (base et fichier ADIF), la main courante et les réglages sont copiés automatiquement dans Documents\CATPilot\Sauvegardes, dans un dossier daté (ex. 2026-10-26_23h15m02).
-- Une nouvelle copie n'est faite que si quelque chose a changé depuis la précédente (QSO ajouté, modifié ou supprimé, main courante, réglages).
-- Les 30 dernières sauvegardes sont conservées, les plus anciennes sont effacées.
-- Menu Carnet : « Sauvegarder le carnet à la fermeture » (coché par défaut, décochable), « Sauvegarder le carnet maintenant » et « Ouvrir le dossier des sauvegardes du carnet ».
-- Pour restaurer : fermer le logiciel, puis recopier carnet.sqlite (et main_courante.sqlite) d'une sauvegarde dans Documents\CATPilot.
+Nouveautés de la 0.26.0 (mode d'emploi) :
+- Nouvel onglet « Mode d'emploi » (bouton de la barre des panneaux, touche F1, ou menu Aide) : le mode d'emploi complet du logiciel, avec sommaire, recherche et taille du texte réglable.
+- Impression de tout le mode d'emploi ou du seul chapitre choisi (« Imprimer… », « Imprimer ce chapitre… »), et « Enregistrer en PDF… » (A4).
+- Le dernier chapitre reprend les nouveautés de toutes les versions ; « Aide > Nouveautés de cette version » y mène directement.
+- Le mode d'emploi est mis à jour à chaque nouvelle version.

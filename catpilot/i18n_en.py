@@ -420,6 +420,17 @@ EXACT = {
     "liaison perdue pendant la restauration ; vérifiez le poste": "link lost during restore; check the radio",
     "lisez d'abord les mémoires : un canal programmé sert de modèle": "read the memories first: a programmed channel is the template",
     "liaison distante perdue": "remote link lost", "liaison fermée": "link closed",
+    # mode d'emploi et sauvegarde du carnet
+    "Mode d'emploi": "User manual", "Mode d'emploi du logiciel, imprimable (F1)": "Software manual (French), printable (F1)",
+    "Nouveautés de cette version": "What's new in this version", "Enregistrer le mode d'emploi en PDF…": "Save the manual as PDF…",
+    "Rechercher dans le mode d'emploi… (Entrée : suivant)": "Search the manual… (Enter: next)", "Suivant": "Next",
+    "Texte plus petit": "Smaller text", "Texte plus grand": "Larger text", "Imprimer…": "Print…",
+    "Imprimer tout le mode d'emploi": "Print the whole manual", "Imprimer ce chapitre…": "Print this chapter…",
+    "Imprimer seulement le chapitre choisi dans le sommaire": "Print only the chapter selected in the contents",
+    "Enregistrer en PDF…": "Save as PDF…", "Créer un fichier PDF de tout le mode d'emploi": "Create a PDF of the whole manual",
+    "Enregistrer le mode d'emploi en PDF": "Save the manual as PDF", "F1 : mode d'emploi\n": "F1: user manual\n",
+    "Sauvegarder le carnet à la fermeture": "Back up the log on exit", "Sauvegarder le carnet maintenant": "Back up the log now",
+    "Ouvrir le dossier des sauvegardes du carnet": "Open the log backups folder", "Sauvegarde du carnet…": "Backing up the log…",
 }
 
 # Modèles : « {} » = partie variable. Ordre des parties conservé.
@@ -567,4 +578,8 @@ TEMPLATES = {
     "Opérateur distant {} déconnecté": "Remote operator {} disconnected", "Accès distant refusé à {} (mot de passe)": "Remote access refused to {} (password)",
     "Impossible : {}": "Not possible: {}", "Audio distant indisponible : {}": "Remote audio unavailable: {}",
     "{} opérateur(s) distant(s) connecté(s)": "{} remote operator(s) connected",
+    "Imprimer — {}": "Print — {}", "Impression envoyée : {}": "Sent to printer: {}", "PDF enregistré : {}": "PDF saved: {}",
+    "« {} » n'apparaît pas dans le mode d'emploi": "“{}” does not appear in the manual",
+    "{} {} · {} chapitres · F1 ouvre ce mode d'emploi à tout moment": "{} {} · {} chapters · F1 opens this manual at any time",
+    "Carnet sauvegardé dans {}": "Log backed up to {}",
 }

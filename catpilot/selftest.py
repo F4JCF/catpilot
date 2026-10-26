@@ -93,6 +93,31 @@ def run(path):
         import sounddevice as sd
         return sd.get_portaudio_version()[1]
     check("Son (PortAudio)", son)
+    def manuel():
+        import os
+        import tempfile
+        from PySide6.QtWidgets import QApplication
+        from . import __version__
+        from .manual import ManualDock, build, read_news
+        app = QApplication.instance() or QApplication(["selftest"])
+        news = read_news()
+        assert news and news[0][0] == __version__, \
+            f"la version {__version__} manque en tête de assets/manuel/nouveautes.txt"
+        _h, chapters = build()
+
+        class _W:
+            from PySide6.QtCore import QSettings
+            settings = QSettings("F4JCF", "selftest-manuel")
+        dock = ManualDock(_W())
+        dock._quiet = True
+        pdf = os.path.join(tempfile.mkdtemp(), "manuel.pdf")
+        dock.save_pdf(pdf)
+        size = os.path.getsize(pdf)
+        assert size > 20000, f"PDF trop petit ({size} octets)"
+        del app
+        return f"{len(chapters)} chapitres, {len(news)} versions, PDF {size // 1024} ko"
+    check("Mode d'emploi", manuel)
+
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     return 0 if ok else 1

@@ -1,0 +1,229 @@
+# Historique des versions, la plus récente en premier.
+# Format : « == version | date | titre facultatif », puis une ligne par nouveauté (« - … »).
+# À compléter à chaque nouvelle version (l'auto-test vérifie que la version en cours y figure).
+
+== 0.26.0 | 2026-10-27 | mode d'emploi
+- Nouvel onglet « Mode d'emploi » (bouton de la barre des panneaux, touche F1, ou menu Aide) : le mode d'emploi complet du logiciel, avec sommaire, recherche et taille du texte réglable.
+- Impression de tout le mode d'emploi ou du seul chapitre choisi (« Imprimer… », « Imprimer ce chapitre… »), et « Enregistrer en PDF… » (A4).
+- Le dernier chapitre reprend les nouveautés de toutes les versions ; « Aide > Nouveautés de cette version » y mène directement.
+- Le mode d'emploi est mis à jour à chaque nouvelle version.
+
+== 0.25.4 | 2026-10-26 | sauvegarde du carnet
+- À chaque fermeture du logiciel, le carnet de trafic (base et fichier ADIF), la main courante et les réglages sont copiés automatiquement dans Documents\CATPilot\Sauvegardes, dans un dossier daté (ex. 2026-10-26_23h15m02).
+- Une nouvelle copie n'est faite que si quelque chose a changé depuis la précédente (QSO ajouté, modifié ou supprimé, main courante, réglages).
+- Les 30 dernières sauvegardes sont conservées, les plus anciennes sont effacées.
+- Menu Carnet : « Sauvegarder le carnet à la fermeture » (coché par défaut, décochable), « Sauvegarder le carnet maintenant » et « Ouvrir le dossier des sauvegardes du carnet ».
+- Pour restaurer : fermer le logiciel, puis recopier carnet.sqlite (et main_courante.sqlite) d'une sauvegarde dans Documents\CATPilot.
+
+== 0.25.3 | 2026-10-26 | carnet
+- Nouvelle colonne « Mon indicatif » : l'indicatif avec lequel chaque QSO a été fait (F4JCF, F4JCF/P, FR/F4JCF/P…), repris des fichiers ADIF importés (STATION_CALLSIGN, sinon OPERATOR).
+- Modifiable par double-clic sur le QSO, ou pour plusieurs QSO à la fois : sélectionnez-les, clic droit, « Mon indicatif pour ces QSO… » (utile pour un ancien carnet importé sans cette information).
+
+== 0.25.2 | 2026-10-26 | import ADIF
+- À l'import d'un fichier ADIF, CAT Pilot demande si le fichier a déjà été contrôlé.
+  - « Oui » : tout est importé tel quel, sans recherche de doublons.
+  - « Non » : les doublons (même indicatif, bande et mode à 3 minutes près, déjà dans le carnet ou répétés dans le fichier) sont écartés et présentés dans une fenêtre : cochez ceux à importer quand même, ou annulez l'import.
+- Import beaucoup plus rapide pour les gros fichiers.
+
+== 0.25.1 | 2026-10-26 | carnet
+- Locator manquant : quand QRZ.com (sans abonnement), HamQTH ou QRZCQ ne donnent pas le locator, CAT Pilot le lit sur la page publique de QRZCQ.com (locator, latitude, longitude), sans compte.
+- En dernier recours, pour une station française, le locator est celui du centre de sa commune (d'après le QTH, service public geo.api.gouv.fr), avec la mention « locator du centre de la commune ».
+- Le département est alors trouvé d'après ce locator, et la petite carte place correctement le correspondant.
+
+== 0.25.0 | 2026-10-25 | 
+- Un poste par indicatif : Carnet > « Mes indicatifs et leur matériel » (ou le bouton « Matériel… » à côté de « Je trafique en »). Pour chaque indicatif (F4JCF, F4JCF/P, FR/F4JCF/P…) : le poste, son port, sa vitesse, et si besoin un locator. Choisir l'indicatif dans le carnet fait passer CAT Pilot sur ce poste (en se reconnectant s'il était connecté) et, en portable, sur ce locator. Retour automatique à la position habituelle pour un indicatif sans locator.
+- Nouveaux postes : Yaesu FT-817, FT-818, FT-857 et FT-897 (CAT binaire). Ce que leur CAT ne permet pas de piloter (puissance, filtres, AGC, menus…) est masqué ; la CW passe par la ligne DTR/RTS d'une interface ; les mémoires sont gérées dans une banque sur le PC.
+- Le titre « Mise à jour » passe en orange quand une version est disponible (vérification discrète toutes les 6 heures).
+
+== 0.24.1 | 2026-10-25 | 
+- Carnet : département du correspondant français (numéro et nom, ex. « 38 Isère »), trouvé d'après son code postal (fiche QRZ.com, HamQTH, QRZCQ), sa position ou son locator. Outre-mer d'après le préfixe (FR = 974 La Réunion…). Enregistré dans le QSO (champ ADIF STATE), colonne « Dépt » dans la liste, et modifiable par double-clic.
+- Petite carte dans le carnet : position du correspondant, son département en surbrillance et le trajet depuis votre locator, avec la distance et le cap. Molette pour zoomer.
+- Contours des départements : france-geojson, d'après Admin Express (IGN), Licence ouverte Etalab.
+
+== 0.24.0 | 2026-10-25 | CAT Pilot fonctionne aussi sous Linux
+- Nouveau fichier CATPilot-x86_64.AppImage : à rendre exécutable puis à lancer d'un double-clic, sans installation (Ubuntu 22.04 et suivantes, Debian 12, Linux Mint 21, Fedora…, 64 bits). Aussi en archive CATPilot-linux-x86_64.tar.gz.
+- Sous Linux : ports /dev/ttyUSB0 (Enhanced, CAT) et /dev/ttyUSB1 (Standard, CW/PTT) reconnus ; message d'aide si l'accès au port est refusé (groupe « dialout ») ou si le port est occupé (ModemManager).
+- Son, chute d'eau, modes numériques (FT8/FT4, RTTY, PSK31, SSTV), SDR RTL inclus. Annonces vocales par speech-dispatcher ou espeak-ng. TQSL (LoTW) trouvé dans /usr/bin.
+- Mise à jour automatique de l'AppImage depuis le menu « Mise à jour ».
+- Windows : rien ne change.
+
+== 0.23.3 | 2026-10-18 | 
+- DX cluster beaucoup plus fluide : la liste des spots n'est plus redessinée à chaque spot reçu, mais regroupée (moins d'une fois par seconde), seulement quand le panneau est affiché, et limitée aux 200 derniers spots. Le logiciel ne se fige plus avec un cluster très actif.
+- Alertes du cluster : une seule alerte par indicatif et par heure ; son et voix au plus toutes les 15 secondes. Pas d'alerte « nouveau pays » quand le carnet est vide.
+- Carnet : affichage de la liste plus rapide.
+
+== 0.23.2 | 2026-10-18 | 
+- Plusieurs indicatifs : en haut du carnet, « Je trafique en » permet de choisir l'indicatif des prochains QSO (F4JCF, F4JCF/P, FR/F4JCF/P, TK/F4JCF…). Tapez-en un nouveau puis Entrée pour l'ajouter à la liste ; « Retirer » l'enlève. Le sens est rappelé à côté (portable, mobile, depuis La Réunion…).
+- L'indicatif choisi sert pour le carnet (station), les messages CW, les étiquettes QSL et PSK Reporter ; le DX cluster et le RBN utilisent l'indicatif principal. Il s'affiche en bas de la fenêtre.
+
+== 0.23.1 | 2026-10-18 | 
+- DX cluster : liste déroulante de clusters (VE7CC, DXFun, W3LPL, NC7J, GB7MBC, K3LR, RBN) ; on peut toujours taper une autre adresse.
+- L'onglet « Main courante » s'appelle « ADRASEC MC » et se trouve tout à droite, après « Panoramique ».
+- Main courante : suppression d'un message (bouton « Supprimer le message », clic droit ou touche Suppr), avec confirmation. Les numéros des autres messages ne changent pas et ne sont jamais réutilisés.
+
+== 0.23.0 | 2026-10-18 | 
+- Cartes QSL papier : colonne « QSL » dans le carnet (✉ à envoyer, ↑ envoyée, ✔ reçue). Clic droit sur un ou plusieurs QSO : carte à envoyer, envoyée par le bureau ou en direct, reçue. Aussi dans la fenêtre de modification (double-clic).
+- Étiquettes QSL : PDF prêt à imprimer sur planches A4 (24, 21, 14 ou 30 étiquettes), une étiquette par correspondant avec jusqu'à 4 QSO et son manager (« via »). On peut commencer sur une planche entamée. Carnet > Étiquettes QSL, ou clic droit dans le carnet.
+- Photo de l'opérateur dans la fiche de l'indicatif (HamQTH, QRZ.com ou QRZCQ), clic pour l'agrandir.
+- Statistiques en graphiques (Diplômes > Graphiques) : QSO par mois, par jour, par bande, par mode et par continent, et bouton pour voir tous ses QSO sur la carte.
+- Enregistrement du son des QSO : bouton « Enregistrer le son » dans le carnet (ou automatique dès qu'on tape un indicatif). Le fichier est rattaché au QSO : ♪ dans la liste, clic pour l'écouter.
+- Spots : drapeau et pays de chaque station, et couleurs : rouge nouveau pays, orange pays nouveau sur la bande, jaune pays pas encore confirmé, gris indicatif déjà contacté.
+- PSK Reporter dans « Qui m'entend ? » : les stations qui ont décodé vos émissions FT8/FT4… s'affichent avec les spots du RBN, et sur la carte.
+- Balises NCDXF/IARU : nouvel onglet « Balises » des spots (la balise qui émet sur chaque bande, son lieu, sa distance), double-clic pour l'écouter, « Suivre la balise » d'une bande à l'autre. Couche « Balises » sur la carte.
+- Alertes de propagation : ouverture du 6 m (sporadique E, d'après hamqsl.com et le DX cluster), aurore et orage magnétique. Affichage > Alertes de propagation.
+- Annonce vocale à la demande : touche F9 (fréquence, mode, S-mètre, puissance). Option d'annonce de la bande et de l'antenne à chaque changement de bande.
+- Profils d'antenne (Poste > Profils d'antenne) : par bande, l'antenne, la puissance maximale et un rappel (boîte d'accord, commutateur). Affichés au changement de bande ; la puissance est ramenée sous le maximum. L'antenne en service s'affiche en bas de la fenêtre.
+
+== 0.22.2 | 2026-10-18 | 
+- Carnet : colonnes de la liste dans l'ordre Date, UTC, Indicatif, Nom, Pays, Fréquence, Bande, Mode, Env., Reçu, eQSL, LoTW, Réf.
+
+== 0.22.1 | 2026-10-18 | carnet
+- RST envoyé et reçu réunis sur une seule ligne.
+- Activités : menu déroulant (POTA, SOTA, WWFF, BOTA, IOTA, LLOTA, DFCF, DMF, Autre) avec la case de la référence juste en dessous, pour votre activation (« Mon activité », mémorisée) et pour celle du correspondant (« Son activité »).
+- Recherche d'indicatif : le prénom et le nom complets sont repris, et le locator est calculé à partir de la position quand la fiche n'en donne pas.
+- Double-clic sur un QSO de la liste : fenêtre pour le modifier (indicatif, date, heure, fréquence, mode, RST, nom, QTH, locator, activités, QSL via, commentaire) ou le supprimer.
+- La liste des QSO affiche la fréquence.
+
+== 0.22.0 | 2026-10-18 | 
+- Carnet : le drapeau du pays s'affiche à côté de l'indicatif dès la saisie, avec le nom du pays en français. Le tableau du carnet a une colonne « Pays » avec drapeau.
+- Recherche d'indicatif sur QRZCQ.com (compte gratuit, dans Carnet > Réglages), en plus de HamQTH, QRZ.com et callook.info. Bouton « QRZCQ » pour ouvrir la fiche.
+- La fiche indique le manager QSL (« QSL via »), si l'indicatif utilise LoTW (avec la date de son dernier envoi) et s'il est membre eQSL AG.
+- Gestion des QSL eQSL et LoTW : CAT Pilot relève les confirmations reçues (boîte de réception eQSL, QSL LoTW) et les rapproche des QSO du carnet. Colonnes eQSL et LoTW dans le carnet : ✔ confirmé, ↑ envoyé en attente. Relevé automatique une fois par jour, ou « Confirmations eQSL / LoTW ». Pour LoTW, indiquez l'identifiant et le mot de passe du site lotw.arrl.org dans Carnet > Envoi en ligne.
+- Diplômes : les pays DXCC confirmés sont distingués des pays seulement contactés.
+- Drapeaux : flag-icons (licence MIT).
+
+== 0.21.6 | 2026-10-18 | 
+- Extinction à la fermeture : si la liaison était perdue au moment de quitter, CAT Pilot rouvre le port et envoie quand même l'ordre d'extinction au poste (avant, il ne l'envoyait pas). L'ordre est aussi répété, après un réveil du processeur CAT.
+- Journal de la liaison CAT : il garde maintenant les échanges qui précèdent le tout premier silence du poste (pour trouver la commande qui le bloque), et note les tentatives d'allumage et d'extinction.
+
+== 0.21.5 | 2026-10-18 | 
+- Liaison CAT : avant de déclarer la liaison perdue, CAT Pilot tente de la réveiller (tampons vidés, lignes série remises au repos, auto-information coupée).
+- Journal de la liaison (Poste > Ouvrir le journal de la liaison CAT) : en cas de coupure, il contient maintenant les 40 derniers échanges avec le poste et l'état des lignes de la prise série, pour trouver la cause exacte.
+
+== 0.21.4 | 2026-10-18 | 
+- Reconnexion automatique : si la liaison avec le poste est perdue (câble, mise en veille USB, poste éteint un instant…), CAT Pilot se reconnecte tout seul toutes les 5 secondes, sans rallumer le poste. À désactiver dans Poste > Reconnexion automatique.
+- Journal de la liaison CAT (Poste > Ouvrir le journal de la liaison CAT) : connexions, erreurs, coupures et reconnexions y sont notées avec l'heure, pour trouver la cause d'une coupure.
+- Rappel de la 0.21.3 : plus de déconnexion en CW avec les Yaesu (messages d'auto-information ignorés), et modification des messages de la main courante par double-clic, avec la date de modification notée.
+
+== 0.21.3 | 2026-10-18 | 
+- Correction : le FT-991A (et les autres Yaesu) ne se déconnecte plus en CW. En BK-IN, le poste envoyait des messages non demandés (auto-information) que CAT Pilot prenait pour des réponses de travers. Ces messages sont maintenant ignorés, l'auto-information est coupée à la connexion, et la liaison n'est déclarée perdue qu'après 6 secondes sans aucune réponse.
+- Main courante : double-clic sur un message de la liste pour le modifier. Il revient dans le formulaire ; « Enregistrer la modification » le corrige sans changer son numéro ni son heure. La date de la modification est notée (✎ dans la liste, mention dans le PDF et le CSV), pour garder la traçabilité.
+
+== 0.21.2 | 2026-10-18 | main courante
+- Horodatage automatique : l'heure avance en direct tant que rien n'est saisi, puis se fige toute seule dès le premier caractère tapé (De, À, Moyen, Type ou Message). Plus besoin de cliquer sur « Maintenant » (le bouton « Remettre à l'heure » reste pour reprendre l'heure actuelle).
+- Nouveau champ « Type » de message, avec les types habituels : Message, Information, Ordre, Demande, Compte rendu, Point de situation, Bilan, Alerte, Contrôle radio, Accusé de réception, Relève. Les modèles choisissent le type tout seuls. Colonne « Type » dans le tableau et dans les exports PDF/CSV.
+- De, À, Moyen et Opérateur sont des listes déroulantes déjà remplies (PC ADRASEC 06, COD 06, CODIS 06, SDIS 06, Préfecture 06, SAMU 06, Gendarmerie, Mairie… ; VHF, UHF, HF, Relais, Téléphone…) et qui retiennent les indicatifs et organismes saisis, les plus récents en tête. La saisie propose aussi les noms déjà connus.
+
+== 0.21.1 | 2026-10-18 | 
+- Les panneaux (Spots, Carte, Carnet, Numérique…) s'ouvrent maintenant en grand : ils prennent toute la fenêtre, et seuls restent en haut l'afficheur de fréquence avec le plan de bande, le S-mètre, le SWR et l'ALC.
+- Le panneau qu'on ouvre remplace le précédent. Un nouveau clic sur son bouton (ou la croix) le ferme et la face avant complète revient.
+- Pour retrouver l'ancien comportement (panneau sur le côté) : Affichage > Panneaux en grand (à décocher). Un panneau détaché en fenêtre reste libre.
+
+== 0.21.0 | 2026-10-18 | 
+- Analyseur de SWR (Poste > Analyseur de SWR) : balayage d'une bande avec une porteuse à faible puissance (5 W par défaut), courbe du SWR, meilleur point et plage où le SWR reste sous 2. Arrêt immédiat (Stop, Échap, ou SWR trop élevé) ; le poste retrouve sa fréquence, son mode et sa puissance.
+- Concours (carnet, case « Concours ») : numéro de série automatique ({NR} dans les messages CW), échange envoyé et reçu, doublons signalés en rouge, export Cabrillo (Carnet > Exporter un concours en Cabrillo).
+- Sauvegarde Nextcloud (Carnet > Sauvegarde Nextcloud) : carnet, main courante et réglages (sans mot de passe) envoyés une fois par jour sur votre Nextcloud, avec une copie datée du carnet. Fonctionne aussi avec un autre serveur WebDAV.
+- Main courante : modèles de messages ADRASEC (arrivée sur zone, contrôle radio, position, point de situation, bilan radio, demande de moyens, relève, fin de mission), modifiables. Option pour y noter automatiquement chaque QSO du carnet pendant l'opération.
+
+== 0.20.0 | 2026-10-18 | 
+- Fréquences récentes : bouton « Récents » à côté de la saisie de fréquence, les 10 dernières fréquences (et leur mode) en un clic.
+- Afficheur de fréquence : le chiffre sous la souris est souligné (la molette règle ce chiffre). Taille réglable : Affichage > Taille de l'afficheur de fréquence.
+- Chute d'eau : hauteur réglable (Affichage > Hauteur de la chute d'eau) et nouveau panneau « Panoramique », une grande chute d'eau détachable (idéale sur un second écran). Clic = accord, comme la petite.
+- Dispositions des panneaux : CAT Pilot rouvre les panneaux là où vous les aviez laissés. Affichage > Dispositions : « Trafic CW », « FT8 / numérique », « ADRASEC », « Chasse POTA / DX », ou vos propres dispositions enregistrées.
+- Barre d'état : bande, mode, puissance, SWR max de la dernière émission et nombre de QSO du jour.
+- Plein écran avec gros boutons (F11), pour une tablette ou un second écran.
+- Annonces vocales (Affichage > Annonces vocales) : fréquence et mode après chaque réglage, alertes du DX cluster.
+- Programmateur (Poste > Programmateur) : à l'heure dite, le poste se règle tout seul sur la fréquence et le mode prévus (réseau ADRASEC, balise, rendez-vous), avec un rappel quelques minutes avant.
+
+== 0.19.2 | 2026-10-18 | 
+- Les boutons des panneaux (Spots, Carte, Carnet, Numérique…) sont maintenant sur une seule ligne, juste sous le menu « Poste Affichage Carnet… ».
+- Le galvanomètre « ROS » s'appelle maintenant « SWR ».
+
+== 0.19.1 | 2026-10-18 | 
+- Retour à l'affichage d'avant : la face avant « Bleu nuit » de la 0.19.0 est retirée. Le logiciel est identique à la 0.18.0 (modes numériques, carte, RBN, main courante, envoi en ligne…).
+
+== 0.19.0 | 2026-10-18 | nouvelle face avant « Bleu nuit »
+- Fond bleu nuit, bandeau de montagnes en haut, panneaux arrondis aux titres dorés.
+- Touches lumineuses : la bande, le mode et les fonctions actives s'allument en bleu vif.
+- Grand afficheur de fréquence vert sur fond noir, curseurs et cases à cocher assortis.
+- Toutes les touches gardent leur fonction. L'ancien affichage reste disponible : Affichage > Thème > Noir classique. Le mode nuit (rouge) fonctionne toujours.
+
+== 0.18.0 | 2026-10-18 | les modes numériques, sans logiciel en plus
+Nouveau panneau « Numérique » (bouton en bas). Réception par l'audio USB du poste, émission en DATA-U par sa sortie audio USB. Réglez « Sortie audio » (USB Audio CODEC) et « Niveau » en bas du panneau : l'ALC ne doit pas bouger.
+- FT8 et FT4 : décodage de chaque créneau calé sur l'heure UTC (l'horloge du PC doit être juste à la seconde près), rapport en dB, DT, pays et distance. Couleurs : vert CQ, rouge pour vous, orange pays jamais contacté. Double-clic sur un CQ : CAT Pilot répond et mène le QSO jusqu'au 73 (séquence automatique comme WSJT-X), puis le note au carnet (et l'envoie en ligne si c'est réglé). « Appeler CQ » pour lancer vos appels. Maj+clic dans la chute d'eau pour choisir la fréquence d'émission. Moteur ft8_lib : un peu moins sensible que WSJT-X (environ 2 dB).
+- RTTY 45 bauds et PSK31 : texte reçu en clair (clic dans la chute d'eau sur le signal), AFC, squelch, texte à émettre et 6 messages programmables (clic droit pour les modifier).
+- SSTV : réception des images avec reconnaissance du mode (Robot, Martin, Scottie, PD), galerie et enregistrement dans Documents/CATPilot/sstv. Émission d'une image de votre choix, avec votre texte écrit dessus.
+- Sans poste (« Signal de test ») : une petite bande FT8 simulée répond à vos appels, pour s'entraîner sans émettre.
+- IC-7300 et IC-9700 : lecture, écriture et sauvegarde des mémoires (IC-9700 : par bande 144 / 430 / 1 200 MHz) et des menus du poste. Les réglages CI-V, la date et l'heure ne sont jamais réécrits. À vérifier sur un vrai poste.
+
+== 0.17.0 | 2026-10-18 | 
+- Carnet > Envoi en ligne : QRZ.com (clé API du carnet), eQSL, Club Log et LoTW (par TQSL). Envoi d'un clic, ou automatique à chaque QSO. Chaque service garde la trace de ce qui a déjà été envoyé. Les QSO déjà présents et ceux importés ne partent pas d'office.
+- Carnet > Diplômes et statistiques : pays DXCC par bande, continents (WAC), zones CQ (WAZ) et ITU, carrés locator (VUCC), parcs POTA chassés et activés, tableau bandes et modes. Export CSV.
+- Nouveau panneau « Main courante » pour l'ADRASEC : une liste numérotée par opération ou exercice, heure figée dès la saisie, moyen radio pris sur le poste, priorités en couleur (urgent, très urgent), suite donnée modifiable. Export PDF (A4 paysage, avec visa du responsable) et CSV.
+
+== 0.16.0 | 2026-10-18 | 
+- « Qui m'entend ? » (panneau Spots) : bouton « Écouter le RBN ». Lancez un CQ ; les stations du Reverse Beacon Network qui vous entendent s'affichent avec leur pays, la distance, le rapport en dB et votre vitesse. CW, RTTY, FT8 et FT4.
+- Nouveau panneau « Carte » : ligne grise (jour, nuit, crépuscule) mise à jour chaque minute, votre station, les stations qui vous entendent, les spots DX des 30 dernières minutes (couleur selon la bande), les activations POTA et vos QSO. Molette pour zoomer, clic sur un spot pour accorder le poste. Lever et coucher du soleil à la station.
+- Alertes du DX cluster : nouveau pays DXCC jamais contacté, nouveau pays sur la bande, ou indicatifs surveillés (TX5S, 3Y0*…). Le spot passe en orange, avec un son.
+- CW : « CQ auto ». Le message choisi est répété avec une écoute entre deux appels ; le décodeur arrête les appels dès qu'un indicatif vous répond, et le met dans le carnet.
+- Pays et zones des indicatifs d'après le fichier cty.dat (mis à jour tout seul chaque mois).
+
+== 0.15.1 | 2026-10-13 | 
+- Décodeur CW : il se met en pause pendant votre émission (manipulation RTS/DTR, mémoire du keyer ou PTT), puis reprend.
+- Décodeur CW : plus de « E E I T » affichés sur le bruit de la bande. Le texte ne s'affiche que si une vraie note CW est repérée.
+
+== 0.15.0 | 2026-10-13 | 
+- Décodeur CW : dans le panneau « CW au clavier », bouton « Décoder ». Le morse reçu sur l'audio USB du poste s'affiche en texte.
+- La note CW est trouvée toute seule (case « Note auto »), ou prise sur la tonalité CW du poste. Un repère orange « CW » la montre sur la chute d'eau.
+- La vitesse (mots/min) et le seuil s'adaptent tout seuls ; le niveau du signal est affiché.
+- Double-clic sur un indicatif reçu : il passe dans « Correspondant » et dans le carnet de trafic, qui cherche sa fiche.
+- Le signal de test (sans poste) contient maintenant un appel CW à 900 Hz pour essayer le décodeur.
+
+== 0.14.0 | 2026-10-13 | 
+- Carnet de trafic : la fiche de l'indicatif se cherche toute seule pendant la frappe (plus besoin d'appuyer sur Entrée).
+- Nouvelle source QRZ.com (compte à saisir dans Carnet > Réglages), en plus de HamQTH.com.
+- Sans compte : pays, zones CQ et ITU trouvés d'après le préfixe, et indicatifs américains via callook.info.
+- Les sites sont interrogés l'un après l'autre et se complètent.
+- Boutons « QRZ.com » et « HamQTH » pour ouvrir la fiche de l'indicatif dans le navigateur.
+- Si l'indicatif est corrigé, les champs remplis automatiquement sont remplacés par la bonne fiche.
+
+== 0.13.3 | 2026-10-13 | 
+- Quand une nouvelle version est disponible, le menu « Mise à jour » s'affiche en orange.
+
+== 0.13.2 | 2026-10-13 | 
+- Correction : après une mise à jour (ou un changement de langue), le logiciel se relance bien tout seul.
+
+== 0.13.1 | 2026-10-13 | 
+- Nouvelle icône du logiciel (badge « Ham Radio Operator »).
+
+== 0.13 | 2026-10-13 | 
+- Pilotage à distance entre deux CAT Pilot, audio compris, protégé par mot de passe.
+- Installateur Windows (CATPilot-Setup), icône du logiciel.
+- Interface en anglais (menu Affichage > Langue).
+- Boutons standard (Oui, Non, Annuler) en français.
+
+== 0.12 | 2026-10-13 | 
+- Satellites : passages, suivi avec correction Doppler (split VFO A/B), tonalité CTCSS, rotor en azimut et élévation, transpondeurs linéaires.
+- Panoramique SDR (RTL-SDR, NooElec) en USB ou via rtl_tcp : spectre et chute d'eau large, clic pour accorder le poste.
+
+== 0.11 | 2026-10-13 | 
+- IC-705 : lecture et écriture des mémoires (par groupe), sauvegarde et restauration des menus.
+- Nouveaux postes : Yaesu FT-710 et FTDX10, Icom IC-7300 et IC-9700 (23 cm compris).
+- Rotor d'antenne : GS-232 ou rotctld, rose des vents, orientation vers un locator ou un spot.
+
+== 0.10 | 2026-10-13 | 
+- Spots POTA, SOTA et DX cluster : double-clic pour accorder le poste et préparer le QSO.
+- Carnet de trafic : recherche HamQTH, « déjà contacté », import/export ADIF, export d'activation POTA.
+- Liaison WSJT-X : stations entendues, appel par double-clic, QSO inscrits automatiquement au carnet.
+
+== 0.9 | 2026-10-13 | 
+- Plan de bandes IARU Région 1 sous la fréquence, et coupure de l'émission hors des bandes amateurs.
+- Mode nuit (Ctrl+N), taille du texte réglable, mode compact (Ctrl+K).
+- Position de la station : locator, GPS de l'IC-705 ou GPS NMEA.
+- Messages vocaux : 6 messages enregistrés au micro du PC, émis d'un clic (Ctrl+F1 à F4), appel en boucle.
+
+== 0.8 | 2026-10-08 | premières versions
+- Menu « Mise à jour » : vérification au démarrage et mise à jour automatique en un clic.
+- Icom IC-705 (protocole CI-V).
+- Yaesu FT-891, CW au clavier, horloge UTC et propagation, enregistrement de la réception, audio d'émission.
+

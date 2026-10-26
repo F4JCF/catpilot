@@ -367,8 +367,13 @@ class MainWindow(QMainWindow):
         self.b_bigwf = QPushButton("Panoramique")
         self.b_bigwf.setCheckable(True)
         self.b_bigwf.setToolTip("Grande chute d'eau détachable")
-        self.dock_buttons = self.dock_buttons + (self.b_bigwf, self.b_mc)      # ADRASEC MC tout à droite
-        for dock, btn in ((self.bigwf, self.b_bigwf), (self.digi, self.b_digi), (self.mc, self.b_mc), (self.mapdock, self.b_map), (self.remote, self.b_remote), (self.sat, self.b_sat), (self.sdr, self.b_sdr), (self.rotor, self.b_rot), (self.cw, self.b_cw), (self.dvk, self.b_dvk), (self.txa, self.b_txa),
+        from .manual import ManualDock
+        self.manual = ManualDock(self, "CAT Pilot")
+        self.b_manual = QPushButton("Mode d'emploi")
+        self.b_manual.setCheckable(True)
+        self.b_manual.setToolTip("Mode d'emploi du logiciel, imprimable (F1)")
+        self.dock_buttons = self.dock_buttons + (self.b_bigwf, self.b_manual, self.b_mc)      # ADRASEC MC tout à droite
+        for dock, btn in ((self.manual, self.b_manual), (self.bigwf, self.b_bigwf), (self.digi, self.b_digi), (self.mc, self.b_mc), (self.mapdock, self.b_map), (self.remote, self.b_remote), (self.sat, self.b_sat), (self.sdr, self.b_sdr), (self.rotor, self.b_rot), (self.cw, self.b_cw), (self.dvk, self.b_dvk), (self.txa, self.b_txa),
                           (self.spots, self.b_spots), (self.logdock, self.b_log), (self.wsjtx, self.b_wsjtx)):
             self.addDockWidget(Qt.RightDockWidgetArea, dock)
             self.tabifyDockWidget(self.mem, dock)
@@ -380,7 +385,7 @@ class MainWindow(QMainWindow):
         from .extras import FocusHeader, FocusMode
         self.focus_header = FocusHeader(self)
         self.stack.addWidget(self.focus_header)
-        all_docks = [self.mem, self.bigwf, self.digi, self.mc, self.mapdock, self.remote, self.sat, self.sdr,
+        all_docks = [self.mem, self.manual, self.bigwf, self.digi, self.mc, self.mapdock, self.remote, self.sat, self.sdr,
                      self.rotor, self.cw, self.dvk, self.txa, self.spots, self.logdock, self.wsjtx]
         self.focus = FocusMode(self, all_docks, self.stack, self.focus_header)
         a = QAction("Panneaux en grand (face avant réduite)", self, checkable=True)
@@ -1365,6 +1370,17 @@ class MainWindow(QMainWindow):
         a.triggered.connect(self.open_local_backups)
         cm.addAction(a)
         h = mb.addMenu("Aide")
+        a = QAction("Mode d'emploi", self)
+        a.setShortcut("F1")
+        a.triggered.connect(lambda: self.b_manual.setChecked(True))
+        h.addAction(a)
+        a = QAction("Nouveautés de cette version", self)
+        a.triggered.connect(lambda: (self.b_manual.setChecked(True), self.manual.show_news()))
+        h.addAction(a)
+        a = QAction("Enregistrer le mode d'emploi en PDF…", self)
+        a.triggered.connect(lambda: self.manual.save_pdf())
+        h.addAction(a)
+        h.addSeparator()
         a = QAction("Raccourcis clavier", self)
         a.triggered.connect(self.show_shortcuts)
         h.addAction(a)
@@ -1420,6 +1436,7 @@ class MainWindow(QMainWindow):
 
     def show_shortcuts(self):
         QMessageBox.information(self, "Raccourcis clavier", (
+            "F1 : mode d'emploi\n"
             "F12 : émission (MOX) marche / arrêt\n"
             "Ctrl + ↑ / ↓ : accord d'un pas\n"
             "Ctrl + Maj + ↑ / ↓ : accord de 10 pas\n"
