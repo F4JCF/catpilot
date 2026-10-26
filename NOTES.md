@@ -1,5 +1,3 @@
-Nouveautés de la 0.25.2 (import ADIF) :
-- À l'import d'un fichier ADIF, CAT Pilot demande si le fichier a déjà été contrôlé.
-  - « Oui » : tout est importé tel quel, sans recherche de doublons.
-  - « Non » : les doublons (même indicatif, bande et mode à 3 minutes près, déjà dans le carnet ou répétés dans le fichier) sont écartés et présentés dans une fenêtre : cochez ceux à importer quand même, ou annulez l'import.
-- Import beaucoup plus rapide pour les gros fichiers.
+Nouveautés de la 0.25.3 (carnet) :
+- Nouvelle colonne « Mon indicatif » : l'indicatif avec lequel chaque QSO a été fait (F4JCF, F4JCF/P, FR/F4JCF/P…), repris des fichiers ADIF importés (STATION_CALLSIGN, sinon OPERATOR).
+- Modifiable par double-clic sur le QSO, ou pour plusieurs QSO à la fois : sélectionnez-les, clic droit, « Mon indicatif pour ces QSO… » (utile pour un ancien carnet importé sans cette information).

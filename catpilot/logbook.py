@@ -439,9 +439,9 @@ class HamQTH(QObject):
         self.result.emit(call, info)
 
 
-TABLE_COLS = ["Date", "UTC", "Indicatif", "Nom", "Pays", "Dépt", "Fréquence", "Bande", "Mode", "Env.", "Reçu",
+TABLE_COLS = ["Date", "UTC", "Mon indicatif", "Indicatif", "Nom", "Pays", "Dépt", "Fréquence", "Bande", "Mode", "Env.", "Reçu",
               "QSL", "eQSL", "LoTW", "♪", "Réf."]
-C_PAYS, C_DEPT, C_FREQ, C_QSL, C_EQSL, C_LOTW, C_AUDIO = 4, 5, 6, 11, 12, 13, 14
+C_PAYS, C_DEPT, C_FREQ, C_QSL, C_EQSL, C_LOTW, C_AUDIO = 5, 6, 7, 12, 13, 14, 15
 
 
 class PhotoLoader(QObject):
@@ -1285,6 +1285,7 @@ class LogDock(QDockWidget):
                                        ("moi : " + (r["my_sig"] or "") + " " + r["my_sig_info"]) if r["my_sig_info"] else "")
                            if x.strip())
             vals = [f"{d[6:8]}/{d[4:6]}/{d[:4]}" if len(d) == 8 else d, (r["time_on"] or "")[:4],
+                    (r.get("station_callsign") or r.get("operator") or "").upper(),
                     r["call"], r["name"], country, r.get("state") or "", fq, r["band"], r["submode"] or r["mode"], r["rst_sent"],
                     r["rst_rcvd"], "", "", "", "♪" if r.get("audio_file") else "", ref.strip()]
             for c, val in enumerate(vals):
@@ -1354,6 +1355,9 @@ class LogDock(QDockWidget):
             a = m.addAction(label)
             a.triggered.connect(lambda _c=False, rc=rec: self.mark_qsl(recs, rc))
         m.addSeparator()
+        a = m.addAction(f"Mon indicatif pour ces {n} QSO…" if n > 1 else "Mon indicatif pour ce QSO…")
+        a.triggered.connect(lambda: self.set_station_call(recs))
+        m.addSeparator()
         a = m.addAction(f"Imprimer les étiquettes QSL de la sélection ({n})…")
         a.triggered.connect(lambda: self.win.qsl_labels(recs))
         a = m.addAction("Imprimer les étiquettes de toutes les cartes à envoyer…")
@@ -1368,6 +1372,23 @@ class LogDock(QDockWidget):
         a = m.addAction(f"Supprimer ({n})…")
         a.triggered.connect(self.delete_selected)
         m.exec(self.tbl.viewport().mapToGlobal(pos))
+
+    def set_station_call(self, recs):
+        from PySide6.QtWidgets import QInputDialog
+        calls = my_calls(self.win.settings)
+        cur = (recs[0].get("station_callsign") or "").upper()
+        if cur and cur not in calls:
+            calls.insert(0, cur)
+        call, ok = QInputDialog.getItem(self, "Mon indicatif",
+                                        f"Indicatif utilisé pour {len(recs)} QSO (F4JCF, F4JCF/P, FR/F4JCF/P…) :",
+                                        calls or [""], max(0, calls.index(cur)) if cur in calls else 0, True)
+        call = (call or "").strip().upper().replace(" ", "")
+        if not ok or not call:
+            return
+        if not CALL_RE.match(call):
+            QMessageBox.warning(self, "Indicatif", f"« {call} » ne ressemble pas à un indicatif.")
+            return
+        self.mark_qsl(recs, {"station_callsign": call})
 
     def mark_qsl(self, recs, rec):
         for r in recs:
@@ -1767,6 +1788,8 @@ class QsoEditDialog(QDialog):
             f.addRow(label, e)
             self.ed[key] = e
             return e
+        line("station_callsign", "Mon indicatif", (rec.get("station_callsign") or rec.get("operator") or "").upper(),
+             "ex. F4JCF, F4JCF/P, FR/F4JCF/P")
         line("call", "Indicatif", rec.get("call"))
         line("date", "Date (UTC)", f"{d[6:8]}/{d[4:6]}/{d[:4]}" if len(d) == 8 else d, "jj/mm/aaaa")
         line("time", "Heure (UTC)", f"{t[:2]}:{t[2:4]}", "hh:mm")
@@ -1859,6 +1882,11 @@ class QsoEditDialog(QDialog):
                "mode": mode, "submode": sub,
                "sig": self.cb_sig.currentText().strip().upper() if g("sig_info") else "",
                "my_sig": self.cb_mysig.currentText().strip().upper() if g("my_sig_info") else ""}
+        me = g("station_callsign").upper().replace(" ", "")
+        if me and not CALL_RE.match(me):
+            self.lb.setText(f"« {me} » ne ressemble pas à un indicatif")
+            return
+        rec["station_callsign"] = me
         for k in ("rst_sent", "rst_rcvd", "name", "qth", "gridsquare", "sig_info", "my_sig_info", "qsl_via", "comment",
                   "state"):
             rec[k] = g(k).upper() if k in ("gridsquare", "sig_info", "my_sig_info", "qsl_via") and k != "gridsquare" else g(k)
