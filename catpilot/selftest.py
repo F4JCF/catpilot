@@ -118,6 +118,16 @@ def run(path):
         return f"{len(chapters)} chapitres, {len(news)} versions, PDF {size // 1024} ko"
     check("Mode d'emploi", manuel)
 
+    def ecran():
+        from .screenfit import choose_zoom, DEFAULT_NATURAL
+        nw, nh = DEFAULT_NATURAL
+        z = {k: choose_zoom(w, h, nw, nh) for k, (w, h) in
+             {"1920x1080": (1920, 1040), "1920x1080 125 %": (1536, 824), "1366x768": (1366, 728),
+              "2560x1440": (2560, 1400)}.items()}
+        assert z["1920x1080"] == 1.0 and 0.75 <= z["1366x768"] < 0.9 and z["2560x1440"] > 1.1, z
+        return ", ".join(f"{k} → {v * 100:.0f} %" for k, v in z.items())
+    check("Adaptation à l'écran", ecran)
+
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     return 0 if ok else 1

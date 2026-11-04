@@ -351,11 +351,35 @@ avec un rappel quelques minutes avant. Le logiciel doit rester ouvert.</li>
 </ul>
 
 <h2 id="affichage">19. Affichage, voix et langue</h2>
+<h3>Adaptation à la taille de l'écran</h3>
+<p>Au démarrage, CAT Pilot regarde l'écran sur lequel il s'ouvre (taille, résolution, mise à l'échelle de Windows ou du
+bureau Linux) et choisit une <b>échelle d'interface</b> pour que toute la face avant tienne dans l'écran sans être minuscule :</p>
+<table>
+<tr><th>Écran</th><th>Échelle choisie (environ)</th></tr>
+<tr><td>1920 × 1080, mise à l'échelle Windows 100 %</td><td>100 %</td></tr>
+<tr><td>1920 × 1080, mise à l'échelle Windows 125 %</td><td>92 % (textes un peu plus grands qu'à 100 %)</td></tr>
+<tr><td>1366 × 768 (portable, Linux ou Windows)</td><td>81 %</td></tr>
+<tr><td>2560 × 1440 ou 4K</td><td>jusqu'à 135 %</td></tr>
+</table>
+<ul>
+<li>La fenêtre est aussi ramenée dans l'écran : si elle a été agrandie sur un grand écran puis rouverte sur un plus petit
+(ou après un changement de résolution), elle est réduite et replacée ; au premier lancement elle prend la taille de l'écran.</li>
+<li>Les fenêtres de réglage trop grandes pour l'écran sont réduites à leur ouverture.</li>
+<li>Si la face avant ne tient toujours pas (texte à 130 %, écran très petit), des barres de défilement apparaissent : rien n'est coupé.</li>
+<li><b>Affichage &gt; Échelle de l'interface</b> : « Automatique (selon l'écran) » (conseillé), ou une échelle fixe de 75 à 150 %
+(appliquée au redémarrage). <b>Ajuster la fenêtre à l'écran</b> remet la fenêtre à la bonne taille ;
+<b>Écran et échelle utilisés…</b> indique l'écran détecté et l'échelle retenue.</li>
+<li>L'échelle de l'interface agrandit ou réduit tout (boutons, galvanomètres, textes) ; la <b>taille du texte</b> ne change que les textes.</li>
+</ul>
+<h3>Affichage</h3>
 <ul>
 <li><b>Mode nuit</b> (Ctrl+N) : tout en rouge sombre. <b>Taille du texte</b> : 90 à 130 %.</li>
 <li><b>Mode compact</b> (Ctrl+K) : petite fenêtre (fréquence, bande, mode, S-mètre, MOX) à garder à côté d'un autre logiciel.</li>
 <li><b>Plein écran avec gros boutons</b> (F11), pour une tablette ou un second écran.</li>
 <li>Hauteur de la chute d'eau, taille de l'afficheur de fréquence, panneaux en grand, dispositions.</li>
+</ul>
+<h3>Voix et langue</h3>
+<ul>
 <li><b>Annonces vocales</b> : fréquence et mode après chaque réglage, bande et antenne, alertes du DX cluster, annonce à la demande (F9).</li>
 <li><b>Alertes de propagation</b> : ouverture du 6 m, aurore, orage magnétique.</li>
 <li><b>Langue</b> : français ou anglais (au prochain démarrage). Ce mode d'emploi reste en français.</li>
@@ -404,6 +428,7 @@ avec un rappel quelques minutes avant. Le logiciel doit rester ouvert.</li>
 <tr><td>Pas de chute d'eau, pas d'audio</td><td>Choisir « USB Audio CODEC » ; sous Linux, installer libportaudio2.</td></tr>
 <tr><td>FT8 ne décode rien</td><td>Horloge du PC à l'heure à la seconde près (synchronisation Internet), mode DATA-U, niveau de réception.</td></tr>
 <tr><td>Émission numérique déformée</td><td>Baisser le « Niveau » de sortie jusqu'à ce que l'ALC ne bouge plus.</td></tr>
+<tr><td>Fenêtre trop grande ou trop petite pour l'écran</td><td>Affichage &gt; Échelle de l'interface : « Automatique », puis « Ajuster la fenêtre à l'écran ».</td></tr>
 <tr><td>Un bouton reste grisé</td><td>Le poste refuse cette commande dans ce mode ; il se réactive au changement de mode ou de bande.</td></tr>
 <tr><td>Carnet abîmé ou effacé par erreur</td><td>Restaurer une sauvegarde du dossier Sauvegardes (chapitre 7).</td></tr>
 </table>

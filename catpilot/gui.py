@@ -238,7 +238,7 @@ class AnalogMeter(QWidget):
         super().__init__()
         self.set_scale(title, scale, red_from)
         self.value = self.target = 0.0
-        self.setMinimumSize(QSize(250, 118))
+        self.setMinimumSize(QSize(180, 76))
         t = QTimer(self)
         t.timeout.connect(self._animate)
         t.start(30)
@@ -261,7 +261,11 @@ class AnalogMeter(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         w, h = self.width(), self.height()
         p.fillRect(self.rect(), QColor(METER_BG))
-        cx, cy, r = w / 2, h * 1.45, h * 1.18
+        # rayon le plus grand possible : graduations dans la largeur, arc et chiffres dans la hauteur
+        # (le galvanomètre reste lisible quand la fenêtre est petite ou très large)
+        r = max(30.0, min((w / 2 - 6) / 0.67 - 21, (h - 53) / 0.257))
+        spare = max(0.0, (h - 22) - (0.257 * r + 31))
+        cx, cy = w / 2, r + 31 + spare / 2
         a0, a1 = 132, 48
 
         def ang(f):
@@ -305,6 +309,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"CAT Pilot {__version__} — Yaesu FT-991A")
+        self.setObjectName("mainwindow")
         self.settings = QSettings("F4JCF", "CATPilot")
         self.ctrl = RigController()
         self.server = None
@@ -400,6 +405,8 @@ class MainWindow(QMainWindow):
         self.nmea.position.connect(lambda la, lo: self.set_station(la, lo, "GPS NMEA"))
         self.nmea.status.connect(self.statusBar().showMessage)
         self._load_settings()
+        from .screenfit import WindowFitter
+        self.fitter = WindowFitter(self, self.natural_size)
         self.act_night.setChecked(self.settings.value("night", "false") == "true")
         scale = float(self.settings.value("text_scale", 1.0))
         for a in self.size_group.actions():
@@ -452,7 +459,7 @@ class MainWindow(QMainWindow):
         v.setContentsMargins(0, 0, 0, 0)
         s, val = self._slider(key, lo, hi, fmt, vertical=True)
         self.vslider_widgets[key] = w
-        s.setMinimumHeight(110)
+        s.setMinimumHeight(64)
         v.addWidget(s, 1, Qt.AlignHCenter)
         t = QLabel(title)
         t.setAlignment(Qt.AlignCenter)
@@ -478,7 +485,14 @@ class MainWindow(QMainWindow):
         g.setContentsMargins(6, 6, 6, 6)
         from PySide6.QtWidgets import QStackedWidget
         self.stack = QStackedWidget()
-        self.stack.addWidget(root)
+        # la face avant défile si elle ne tient pas dans l'écran (au lieu d'être coupée)
+        from PySide6.QtWidgets import QScrollArea
+        self.face = root
+        self.face_scroll = QScrollArea()
+        self.face_scroll.setWidget(root)
+        self.face_scroll.setWidgetResizable(True)
+        self.face_scroll.setFrameShape(QFrame.NoFrame)
+        self.stack.addWidget(self.face_scroll)
         self.setCentralWidget(self.stack)
 
         # Bandes
@@ -580,7 +594,9 @@ class MainWindow(QMainWindow):
         self.meter_swr = AnalogMeter("SWR", SWR_SCALE, 89 / 255)
         mh.addWidget(self.meter_s)
         mh.addWidget(self.meter_swr)
-        ml.addLayout(mh)
+        for m in (self.meter_s, self.meter_swr):
+            m.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        ml.addLayout(mh, 1)               # les galvanomètres grandissent avec la fenêtre
         ah = QHBoxLayout()
         ah.addWidget(QLabel("ALC"))
         self.bar_alc = QProgressBar()
@@ -590,7 +606,7 @@ class MainWindow(QMainWindow):
         ah.addWidget(self.bar_alc, 1)
         self.lb_meter = QLabel("")
         self.lb_meter.setObjectName("value")
-        self.lb_meter.setMinimumWidth(130)
+        self.lb_meter.setMinimumWidth(100)
         self.lb_meter.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         ah.addWidget(self.lb_meter)
         ml.addLayout(ah)
@@ -626,7 +642,7 @@ class MainWindow(QMainWindow):
         self.sl_level.valueChanged.connect(lambda v: setattr(self.wf, "offset", float(v)))
         self.lb_wf = QLabel("")
         self.lb_wf.setObjectName("value")
-        self.lb_wf.setMinimumWidth(150)
+        self.lb_wf.setMinimumWidth(110)
         # deux lignes : l'entrée audio a souvent un nom très long sous Windows
         wh.addWidget(self.cb_audio, 1)
         wh.addWidget(self.b_wf)
@@ -1336,6 +1352,24 @@ class MainWindow(QMainWindow):
             a.triggered.connect(lambda _c=False: self.apply_look())
             self.size_group.addAction(a)
             sizes.addAction(a)
+        from .screenfit import AUTO, CHOICES
+        zm = aff.addMenu("Échelle de l'interface (taille de l'écran)")
+        self.zoom_group = QActionGroup(self)
+        cur = str(self.settings.value("ui_zoom", AUTO) or AUTO)
+        for code, label in CHOICES:
+            a = QAction(label, self, checkable=True)
+            a.setData(code)
+            a.setChecked(code == cur)
+            a.triggered.connect(lambda _c=False, c=code: self.change_zoom(c))
+            self.zoom_group.addAction(a)
+            zm.addAction(a)
+        zm.addSeparator()
+        a = QAction("Ajuster la fenêtre à l'écran", self)
+        a.triggered.connect(lambda: self.fitter.fit_now())
+        zm.addAction(a)
+        a = QAction("Écran et échelle utilisés…", self)
+        a.triggered.connect(self.show_screen_info)
+        zm.addAction(a)
         cm = mb.addMenu("Carnet")
         for label, slot in (("Ouvrir le carnet", lambda: self.b_log.setChecked(True)),
                             ("Importer un fichier ADIF…", lambda: self.logdock.import_adif()),
@@ -1860,7 +1894,7 @@ class MainWindow(QMainWindow):
 
     def set_wf_size(self, key):
         self.wf_size = key
-        self.wf.setMinimumHeight({"petite": 70, "normale": 100, "grande": 230}.get(key, 100))
+        self.wf.setMinimumHeight({"petite": 44, "normale": 60, "grande": 220}.get(key, 60))
 
     def set_freq_size(self, pct):
         self.freq_size = pct
@@ -2059,6 +2093,52 @@ class MainWindow(QMainWindow):
         night = self.act_night.isChecked()
         apply_theme(QApplication.instance(), "nuit" if night else "jour", self.text_scale())
         self.bandplan.dim = night
+
+    # --- adaptation à l'écran ---------------------------------------------------------------
+    def natural_size(self):
+        """Taille minimale de la fenêtre pour voir toute la face avant (pixels logiques, cadre compris)."""
+        from .screenfit import FRAME_H, FRAME_W
+        face = self.face.minimumSizeHint()
+        chrome = self.menuBar().sizeHint().height() + self.statusBar().sizeHint().height()
+        rows = {}
+        for tb in self.findChildren(QToolBar):
+            if tb.isVisible() and self.toolBarArea(tb) == Qt.TopToolBarArea and not tb.isFloating():
+                rows[tb.y()] = max(rows.get(tb.y(), 0), tb.sizeHint().height())
+        chrome += sum(rows.values())
+        return face.width() + FRAME_W, face.height() + chrome + FRAME_H
+
+    def change_zoom(self, code):
+        if code == str(self.settings.value("ui_zoom", "auto") or "auto"):
+            return
+        self.settings.setValue("ui_zoom", code)
+        box = QMessageBox(self)
+        box.setWindowTitle("Échelle de l'interface")
+        box.setText("La nouvelle échelle sera appliquée au prochain démarrage de CAT Pilot.")
+        now = box.addButton("Redémarrer maintenant", QMessageBox.AcceptRole)
+        box.addButton("Plus tard", QMessageBox.RejectRole)
+        box.exec()
+        if box.clickedButton() is now:
+            from .updater import restart
+            self._restart_for_update = True          # simple redémarrage : le poste reste allumé
+            restart()
+            self.close()
+
+    def show_screen_info(self):
+        s = self.settings
+        scr = self.screen()
+        g = scr.availableGeometry() if scr else None
+        zoom = float(s.value("ui_zoom_used", 1.0) or 1.0)
+        nw, nh = self.natural_size()
+        mode = "automatique" if str(s.value("ui_zoom", "auto")) == "auto" else "choisie à la main"
+        txt = (f"Écran : {scr.name() if scr else '?'}, {scr.size().width() * zoom:.0f} × {scr.size().height() * zoom:.0f} "
+               f"points utiles à 100 %, mise à l'échelle du système × {scr.devicePixelRatio() / zoom:g}\n" if scr else "")
+        txt += (f"Échelle de l'interface : {zoom * 100:.0f} % ({mode})\n"
+                f"Surface disponible pour CAT Pilot : {g.width()} × {g.height()}\n" if g else "")
+        txt += (f"Taille nécessaire pour la face avant complète : {nw} × {nh}\n\n"
+                "En « Automatique », CAT Pilot choisit l'échelle au démarrage pour que la face avant tienne dans "
+                "l'écran : plus petite sur un écran 1366 × 768, plus grande sur un grand écran. "
+                "Vous pouvez aussi la choisir à la main dans ce menu.")
+        QMessageBox.information(self, "Écran et échelle", txt)
 
     def change_language(self, code):
         if code == self.settings.value("lang", "fr"):
@@ -2494,7 +2574,10 @@ class MainWindow(QMainWindow):
 
 
 def main():
+    from . import screenfit
+    screenfit.prepare()                       # échelle de l'interface selon l'écran (avant QApplication)
     app = QApplication(sys.argv)
+    screenfit.after_app_created()
     from . import cty
     cty.refresh_in_background()
     app.setApplicationName("CAT Pilot")
@@ -2513,5 +2596,9 @@ def main():
     app.setStyleSheet(STYLE)
     w = MainWindow()
     w.apply_look()
+    first_run = not w.settings.value("geometry")
     w.show()
+    w.fitter.start(first_run)
+    app._dialog_fitter = screenfit.DialogFitter(app)
+    app.installEventFilter(app._dialog_fitter)
     sys.exit(app.exec())

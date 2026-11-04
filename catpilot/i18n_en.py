@@ -431,6 +431,11 @@ EXACT = {
     "Enregistrer le mode d'emploi en PDF": "Save the manual as PDF", "F1 : mode d'emploi\n": "F1: user manual\n",
     "Sauvegarder le carnet à la fermeture": "Back up the log on exit", "Sauvegarder le carnet maintenant": "Back up the log now",
     "Ouvrir le dossier des sauvegardes du carnet": "Open the log backups folder", "Sauvegarde du carnet…": "Backing up the log…",
+    # adaptation à l'écran
+    "Échelle de l'interface (taille de l'écran)": "Interface scale (screen size)", "Automatique (selon l'écran)": "Automatic (fits the screen)",
+    "Ajuster la fenêtre à l'écran": "Fit the window to the screen", "Écran et échelle utilisés…": "Screen and scale in use…",
+    "Échelle de l'interface": "Interface scale", "Écran et échelle": "Screen and scale",
+    "La nouvelle échelle sera appliquée au prochain démarrage de CAT Pilot.": "The new scale will be applied the next time CAT Pilot starts.",
 }
 
 # Modèles : « {} » = partie variable. Ordre des parties conservé.
