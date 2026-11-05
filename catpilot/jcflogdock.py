@@ -184,6 +184,8 @@ class JCFLogDock(QDockWidget):
             for d in jcf.docks:
                 if d.objectName() in ("Horloge", "DX Cluster"):
                     d.hide()
+        from .jcflogfiche import Fiche
+        self.fiche = Fiche(self, jcf)       # recherche HamQTH/QRZ/QRZCQ et drapeaux de CAT Pilot
         self._wait.hide()
         self._lay.addWidget(jcf)
         jcf.show()
@@ -211,6 +213,8 @@ class JCFLogDock(QDockWidget):
     def _reload(self):
         if self.jcf:
             try:
+                if getattr(self, "fiche", None):
+                    self.fiche.backfill()      # nouveaux QSO venus de CAT Pilot (FT8, WSJT-X…)
                 self.jcf.apply_filter()
             except Exception:
                 pass
