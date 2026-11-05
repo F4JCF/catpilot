@@ -351,10 +351,9 @@ class CwDock(QDockWidget):
         if not re.match(r"^([A-Z0-9]{1,4}/)?[A-Z0-9]{1,3}\d[A-Z]{1,4}(/[A-Z0-9]{1,4})?$", w):
             return
         self.ed_call.setText(w)
-        log = getattr(self.win, "logdock", None)
+        log = getattr(self.win, "jcfdock", None)
         if log:
-            log.ed_call.setText(w)
-            log.on_call_edit(w)
+            log.set_call(w)
 
     def save_settings(self, s):
         s.setValue("cwdec_auto", self.ck_auto.isChecked())
@@ -390,8 +389,12 @@ class CwDock(QDockWidget):
             self.keyer = None
 
     def _expand(self, text):
-        log = getattr(self.win, "logdock", None)
-        nr = f"{log.sp_serial.value():03d}" if log else "001"
+        jcf = getattr(getattr(self.win, "jcfdock", None), "jcf", None)
+        if jcf is not None and jcf.contest:
+            nr = jcf.e_stx.text() or "001"           # numéro de série du concours JCFLog
+        else:
+            log = getattr(self.win, "logdock", None)
+            nr = f"{log.sp_serial.value():03d}" if log else "001"
         return (text.replace("{MYCALL}", self.ed_mycall.text().strip().upper())
                     .replace("{CALL}", self.ed_call.text().strip().upper()).replace("{NR}", nr))
 

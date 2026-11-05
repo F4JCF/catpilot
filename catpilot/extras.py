@@ -192,9 +192,11 @@ class Layouts:
                 d.addAction(a)
 
     def docks(self):
-        return {n: getattr(self.win, n) for n in ("mem", "cw", "txa", "dvk", "spots", "logdock", "wsjtx", "rotor",
-                                                   "sat", "sdr", "remote", "mapdock", "mc", "digi", "bigwf")
-                if getattr(self.win, n, None) is not None}
+        # « logdock » désigne le panneau Carnet, désormais JCFLog (dispositions déjà enregistrées comprises)
+        alias = {"logdock": "jcfdock"}
+        return {n: getattr(self.win, alias.get(n, n)) for n in ("mem", "cw", "txa", "dvk", "spots", "logdock", "wsjtx",
+                                                                "rotor", "sat", "sdr", "remote", "mapdock", "mc", "digi", "bigwf")
+                if getattr(self.win, alias.get(n, n), None) is not None}
 
     def apply_preset(self, name):
         docks = self.docks()

@@ -128,6 +128,26 @@ def run(path):
         return ", ".join(f"{k} → {v * 100:.0f} %" for k, v in z.items())
     check("Adaptation à l'écran", ecran)
 
+    def carnet_jcflog():
+        import os
+        import tempfile
+        from .logbook import Log
+        from .jcflogdock import shared_db_class
+        from .jcflog import main as _jm          # le carnet JCFLog est bien embarqué
+        log = Log(os.path.join(tempfile.mkdtemp(), "carnet.sqlite"))
+        db = shared_db_class()(log)
+        db.add({"call": "DL1ABC", "qso_date": "20261105", "time_on": "203000", "freq": "14.074000",
+                "band": "20m", "mode": "FT8", "pota_ref": "DE-0001"})
+        log.add({"call": "EA3XYZ", "qso_date": "20261105", "time_on": "203500", "freq": "7.074", "mode": "FT8"})
+        vus_cat = {r["call"]: r for r in log.query()}
+        vus_jcf = {r["call"] for r in db.query()}
+        assert set(vus_cat) == vus_jcf == {"DL1ABC", "EA3XYZ"}, (vus_cat, vus_jcf)
+        assert vus_cat["DL1ABC"]["sig"] == "POTA" and vus_cat["DL1ABC"]["sig_info"] == "DE-0001", vus_cat["DL1ABC"]
+        assert db.add_many([{"call": "G4AAA", "qso_date": "20200101", "time_on": "1200", "band": "40m", "mode": "SSB"}]) == 1
+        assert log.query("call = 'G4AAA'")[0]["up_qrz"] == "import"
+        return f"base commune CAT Pilot / JCFLog : {log.count()} QSO lus des deux côtés"
+    check("Carnet JCFLog", carnet_jcflog)
+
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     return 0 if ok else 1

@@ -1,7 +1,7 @@
-Nouveautés de la 0.27.0 (adaptation à l'écran) :
-- CAT Pilot s'adapte à la taille et à la résolution de l'écran : au démarrage, il choisit une échelle d'interface pour que toute la face avant tienne dans l'écran (environ 100 % en 1920 × 1080, 81 % en 1366 × 768, jusqu'à 135 % sur un grand écran), en tenant compte de la mise à l'échelle de Windows ou du bureau Linux.
-- La fenêtre est ramenée dans l'écran (taille et position) au démarrage, quand on la change d'écran ou quand la résolution change ; au premier lancement, elle prend la taille de l'écran.
-- Les fenêtres de réglage trop grandes pour l'écran sont réduites à leur ouverture.
-- Si la face avant ne tient toujours pas, elle défile au lieu d'être coupée.
-- Face avant plus souple : galvanomètres, curseurs et chute d'eau se réduisent sur un petit écran et s'agrandissent avec la fenêtre.
-- Affichage > Échelle de l'interface : automatique ou fixe (75 à 150 %), « Ajuster la fenêtre à l'écran » et « Écran et échelle utilisés… ».
+Nouveautés de la 0.28.0 (carnet JCFLog) :
+- Le carnet de trafic est maintenant JCFLog : l'onglet « Carnet » contient le logiciel JCFLog complet, avec ses menus (Fichier, Carnet de trafic, Concours, Services, Fenêtre).
+- Une seule base de QSO : JCFLog travaille dans le carnet de CAT Pilot (Documents\CATPilot\carnet.sqlite). Tous vos QSO déjà enregistrés y sont, et les QSO FT8/FT4, WSJT-X ou importés apparaissent aussitôt dans JCFLog.
+- Les QSO saisis dans JCFLog sont envoyés en ligne (QRZ, eQSL, Club Log, LoTW), comptés dans les diplômes, placés sur la carte et sauvegardés comme avant.
+- Le poste reste piloté par CAT Pilot : JCFLog n'ouvre pas le port série, il prend la fréquence et le mode du poste, et ses QSY passent par CAT Pilot.
+- Au premier affichage, un profil de station est créé avec votre indicatif et votre locator ; l'horloge et le DX Cluster de JCFLog sont masqués (déjà présents dans CAT Pilot), menu Fenêtre pour les rouvrir.
+- Un clic sur un spot, une station FT8 ou un indicatif décodé en CW remplit la fiche de JCFLog ; le numéro de série de concours de JCFLog sert pour {NR} en CW.

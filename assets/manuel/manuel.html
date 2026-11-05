@@ -144,46 +144,39 @@ le titre pour le remettre en place.</li>
 </ul>
 
 <h2 id="carnet">6. Le carnet de trafic</h2>
+<p>Le carnet de CAT Pilot est <b>JCFLog</b>, intégré dans l'onglet <b>Carnet</b> (ou Ctrl+L) avec ses propres menus
+(Fichier, Carnet de trafic, Concours, Services, Fenêtre, Aide). Il travaille dans le même fichier que le reste du logiciel
+(<code>carnet.sqlite</code>) : les QSO faits dans l'onglet <b>Numérique</b> (FT8, FT4…), par <b>WSJT-X</b> ou importés y apparaissent
+aussitôt, et ceux saisis dans JCFLog sont envoyés en ligne, comptés dans les diplômes, placés sur la carte et sauvegardés comme les autres.</p>
+<p>Le poste reste piloté par CAT Pilot : JCFLog n'ouvre pas le port série. Il reçoit la fréquence et le mode du poste,
+et un clic sur un spot de son cluster ou un QSY passe par CAT Pilot.</p>
+<h3>Premier lancement</h3>
+<p>Un profil de station est créé avec l'indicatif et le locator réglés dans CAT Pilot. Pour en ajouter (F4JCF/P, FR/F4JCF/P…) ou
+préciser le matériel : <b>Fichier &gt; Paramètres</b> de JCFLog, onglet <b>Station</b>. Le profil se choisit dans l'onglet <b>Ma Station</b>.</p>
 <h3>Saisir un QSO</h3>
 <ol>
-<li>Ouvrez l'onglet <b>Carnet</b> (ou Ctrl+L).</li>
-<li>Tapez l'<b>indicatif</b> : la fiche se cherche toute seule pendant la frappe (nom, prénom, QTH, locator, département,
-distance, cap, photo, drapeau et pays, « QSL via », utilisateur LoTW ou eQSL AG). <b>Déjà contacté</b> s'affiche aussitôt.</li>
-<li>Fréquence, mode et heure UTC sont pris sur le poste ; les RST sont préremplis selon le mode.</li>
-<li>Complétez si besoin : RST envoyé et reçu, commentaire, <b>Mon activité</b> et <b>Son activité</b> (POTA, SOTA, WWFF, BOTA,
-IOTA, LLOTA, DFCF, DMF…) avec leur référence.</li>
-<li><b>Enregistrer le QSO</b> (ou Entrée dans le champ Commentaire). <b>Effacer</b> vide la fiche.</li>
+<li>Tapez l'<b>indicatif</b> : pays, continent, zones CQ et ITU et « déjà contacté » s'affichent ; <b>Services &gt; Rechercher</b>
+complète nom, QTH et locator (comptes HamQTH ou QRZ.com dans les paramètres de JCFLog).</li>
+<li>Fréquence et mode sont pris sur le poste, l'heure UTC est mise à jour toute seule ; ▶ et ■ mesurent la durée du QSO.</li>
+<li>Complétez si besoin : RST, nom, QTH, locator, commentaire, et dans <b>Détails</b> les références POTA, SOTA, WWFF, IOTA…</li>
+<li><b>Enregistrer</b> (ou Entrée). <b>Réinit</b> vide la fiche.</li>
 </ol>
-<p>Les recherches d'indicatif utilisent, l'une après l'autre : HamQTH, QRZ.com, QRZCQ (comptes facultatifs dans
-<b>Carnet &gt; Réglages</b>), callook.info pour les indicatifs américains, et le fichier cty.dat (pays, zones CQ et ITU) sans aucun compte.
-Si le locator manque, il est lu sur la page publique de QRZCQ, ou pris au centre de la commune pour une station française.
-Les boutons <b>QRZ.com</b>, <b>HamQTH</b> et <b>QRZCQ</b> ouvrent la fiche dans le navigateur.</p>
-<p>La <b>petite carte</b> de la fiche montre le correspondant, son département en surbrillance et le trajet depuis votre locator,
-avec distance et cap (molette : zoom).</p>
-<h3>Mes indicatifs et leur matériel</h3>
-<ul>
-<li><b>Je trafique en</b> (en haut du carnet) : choisissez l'indicatif des prochains QSO (F4JCF, F4JCF/P, FR/F4JCF/P…).
-Tapez-en un nouveau puis Entrée pour l'ajouter ; <b>Retirer</b> l'enlève.</li>
-<li><b>Matériel…</b> (ou Carnet &gt; Mes indicatifs et leur matériel) : pour chaque indicatif, le poste, son port, sa vitesse et
-si besoin un locator. En changeant d'indicatif, CAT Pilot passe sur ce poste (et se reconnecte) et, en portable, sur ce locator.</li>
-<li>La colonne <b>Mon indicatif</b> du carnet montre l'indicatif de chaque QSO. Pour corriger d'anciens QSO : sélectionnez-les,
-clic droit, <b>Mon indicatif pour ces QSO…</b></li>
-</ul>
+<p>Un clic sur un spot (onglet Spots), une station FT8 ou un indicatif décodé en CW remplit la fiche de JCFLog.</p>
 <h3>La liste des QSO</h3>
 <ul>
-<li>Colonnes : Date, UTC, Indicatif, Nom, Pays (drapeau), Dépt, Fréquence, Bande, Mode, RST, eQSL, LoTW, QSL papier, Réf., Mon indicatif.</li>
-<li>Symboles : <b>✔</b> confirmé, <b>↑</b> envoyé en attente, <b>✉</b> carte à envoyer, <b>♪</b> son enregistré (clic pour l'écouter).</li>
-<li><b>Double-clic</b> sur un QSO : le modifier ou le supprimer. <b>Clic droit</b> : cartes QSL, étiquettes, mon indicatif.</li>
+<li>Filtres en haut : indicatif, bande, mode, pays. Clic sur un titre de colonne pour trier.</li>
+<li><b>Double-clic</b> sur un QSO : le modifier. <b>Clic droit</b> : supprimer, QSL papier envoyée ou reçue, export de la sélection.</li>
 </ul>
-<h3>Enregistrer le son des QSO</h3>
-<p><b>● Enregistrer le son</b> (ou case <b>auto</b> : dès qu'on tape un indicatif) : le fichier est rattaché au QSO.</p>
+<h3>Panneaux de JCFLog</h3>
+<p>Menu <b>Fenêtre</b> de JCFLog : horloge, DX Cluster, statistiques, alertes… L'horloge et le cluster sont masqués au premier
+affichage, car CAT Pilot les a déjà (heure UTC en haut, onglet Spots). La disposition est retenue à la fermeture.</p>
 <h3>Concours</h3>
-<p>Case <b>Concours</b> : numéro de série automatique (<code>{NR}</code> dans les messages CW), échange envoyé et reçu,
-doublons signalés en rouge, puis <b>Carnet &gt; Exporter un concours en Cabrillo…</b></p>
+<p>Menu <b>Concours</b> de JCFLog : numéro de série envoyé et reçu, doublons signalés. Le numéro envoyé sert aussi de
+<code>{NR}</code> dans les messages CW. Pour l'export : <b>Carnet &gt; Exporter un concours en Cabrillo…</b> (menu de CAT Pilot).</p>
 <h3>Importer et exporter</h3>
 <ul>
-<li><b>Carnet &gt; Importer un fichier ADIF…</b> : le logiciel demande si le fichier a déjà été contrôlé. <b>Oui</b> : tout est importé tel quel.
-<b>Non</b> : les doublons (même indicatif, bande et mode à 3 minutes près) sont présentés dans une fenêtre ; cochez ceux à importer quand même.</li>
+<li><b>Carnet &gt; Importer un fichier ADIF…</b> (ou <b>Fichier &gt; Importer</b> de JCFLog) : les doublons (même indicatif, bande et mode
+à la même minute) sont écartés. Les QSO importés ne sont pas renvoyés aux carnets en ligne.</li>
 <li><b>Exporter tout le carnet en ADIF…</b>, et <b>Exporter l'activation du jour (POTA/SOTA)…</b> au nom attendu par POTA.</li>
 </ul>
 <h3>QSL et diplômes</h3>
@@ -408,7 +401,7 @@ bureau Linux) et choisit une <b>échelle d'interface</b> pour que toute la face 
 <h2 id="fichiers">21. Où sont mes fichiers ?</h2>
 <table>
 <tr><th>Dossier ou fichier (dans Documents\CATPilot)</th><th>Contenu</th></tr>
-<tr><td>carnet.sqlite</td><td>Le carnet de trafic</td></tr>
+<tr><td>carnet.sqlite</td><td>Le carnet de trafic (partagé avec JCFLog, qui y garde aussi ses réglages)</td></tr>
 <tr><td>main_courante.sqlite</td><td>La main courante ADRASEC</td></tr>
 <tr><td>Sauvegardes</td><td>Sauvegardes datées du carnet faites à la fermeture</td></tr>
 <tr><td>sauvegardes</td><td>Sauvegardes des menus et des mémoires du poste</td></tr>

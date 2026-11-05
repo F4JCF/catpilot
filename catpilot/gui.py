@@ -358,7 +358,10 @@ class MainWindow(QMainWindow):
         self.txa = TxAudioDock(self)
         self.dvk = VoiceDock(self)
         self.spots = SpotsDock(self)
-        self.logdock = LogDock(self, self.log)
+        self.logdock = LogDock(self, self.log)      # ancien carnet : gardé caché (recherche HamQTH/QRZ, exports)
+        self.logdock.hide()
+        from .jcflogdock import JCFLogDock
+        self.jcfdock = JCFLogDock(self)             # le carnet affiché est JCFLog
         self.wsjtx = WsjtxDock(self, self.log)
         self.rotor = RotorDock(self)
         self.sat = SatDock(self)
@@ -379,7 +382,7 @@ class MainWindow(QMainWindow):
         self.b_manual.setToolTip("Mode d'emploi du logiciel, imprimable (F1)")
         self.dock_buttons = self.dock_buttons + (self.b_bigwf, self.b_manual, self.b_mc)      # ADRASEC MC tout à droite
         for dock, btn in ((self.manual, self.b_manual), (self.bigwf, self.b_bigwf), (self.digi, self.b_digi), (self.mc, self.b_mc), (self.mapdock, self.b_map), (self.remote, self.b_remote), (self.sat, self.b_sat), (self.sdr, self.b_sdr), (self.rotor, self.b_rot), (self.cw, self.b_cw), (self.dvk, self.b_dvk), (self.txa, self.b_txa),
-                          (self.spots, self.b_spots), (self.logdock, self.b_log), (self.wsjtx, self.b_wsjtx)):
+                          (self.spots, self.b_spots), (self.jcfdock, self.b_log), (self.wsjtx, self.b_wsjtx)):
             self.addDockWidget(Qt.RightDockWidgetArea, dock)
             self.tabifyDockWidget(self.mem, dock)
             dock.hide()
@@ -391,7 +394,7 @@ class MainWindow(QMainWindow):
         self.focus_header = FocusHeader(self)
         self.stack.addWidget(self.focus_header)
         all_docks = [self.mem, self.manual, self.bigwf, self.digi, self.mc, self.mapdock, self.remote, self.sat, self.sdr,
-                     self.rotor, self.cw, self.dvk, self.txa, self.spots, self.logdock, self.wsjtx]
+                     self.rotor, self.cw, self.dvk, self.txa, self.spots, self.jcfdock, self.wsjtx]
         self.focus = FocusMode(self, all_docks, self.stack, self.focus_header)
         a = QAction("Panneaux en grand (face avant réduite)", self, checkable=True)
         a.setChecked(self.focus.enabled)
@@ -919,6 +922,7 @@ class MainWindow(QMainWindow):
         self.mc.save_settings(s)
         self.digi.save_settings(s)
         self.logdock.save_settings(s)
+        self.jcfdock.shutdown()
         self.wsjtx.save_settings(s)
         self.rotor.save_settings(s)
         self.sat.save_settings(s)
@@ -1372,7 +1376,7 @@ class MainWindow(QMainWindow):
         zm.addAction(a)
         cm = mb.addMenu("Carnet")
         for label, slot in (("Ouvrir le carnet", lambda: self.b_log.setChecked(True)),
-                            ("Importer un fichier ADIF…", lambda: self.logdock.import_adif()),
+                            ("Importer un fichier ADIF…", lambda: self.jcfdock.import_adif()),
                             ("Exporter tout le carnet en ADIF…", lambda: self.logdock.export_adif()),
                             ("Exporter l'activation du jour (POTA/SOTA)…", lambda: self.logdock.export_activation()),
                             (None, None),
@@ -1992,12 +1996,11 @@ class MainWindow(QMainWindow):
 
     def prefill_log(self, call, ref="", mode=None):
         self.b_log.setChecked(True)
-        self.logdock.prefill(call, ref, mode)
+        self.jcfdock.prefill(call, ref, mode)
 
     def focus_log(self):
         self.b_log.setChecked(True)
-        self.logdock.raise_()
-        self.logdock.ed_call.setFocus()
+        self.jcfdock.focus_call()
 
     def set_active_call(self, call):
         """Indicatif utilisé pour les prochains QSO (F4JCF, F4JCF/P, FR/F4JCF/P…), mémorisé dans la liste."""

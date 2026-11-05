@@ -14,6 +14,9 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt pyinstaller
+      - name: Base DXCC de JCFLog (cty.csv)
+        shell: bash
+        run: curl -fsSL https://www.country-files.com/cty/cty.csv -o assets/cty.csv || echo "::warning::cty.csv non téléchargé (JCFLog le téléchargera au premier lancement)"
       - name: Bibliothèque FT8 (ft8_lib)
         shell: bash
         run: |
@@ -29,7 +32,7 @@ jobs:
           fi
           python -c "import ctypes; ctypes.CDLL(r'catpilot/ft8lib.dll'); print('ft8lib OK')" 2>&1 | sed 's/^/::notice::/'
           python -c "import ctypes; ctypes.CDLL(r'catpilot/ft8lib.dll')" || { echo "::error::ft8lib.dll ne se charge pas"; exit 1; }
-      - run: pyinstaller --noconfirm --onefile --windowed --name CATPilot --icon assets/catpilot.ico --add-data "assets;assets" --add-binary "catpilot/ft8lib.dll;." --collect-all pyrtlsdrlib --collect-all sstv --hidden-import PySide6.QtTextToSpeech run.py
+      - run: pyinstaller --noconfirm --onefile --windowed --name CATPilot --icon assets/catpilot.ico --add-data "assets;assets" --add-binary "catpilot/ft8lib.dll;." --collect-all pyrtlsdrlib --collect-all sstv --hidden-import PySide6.QtTextToSpeech --exclude-module PySide6.QtWebEngineWidgets --exclude-module PySide6.QtWebEngineCore run.py
       - name: Auto-test de l'exécutable (FT8, FT4, PSK31, RTTY, SSTV)
         shell: bash
         run: |
@@ -72,6 +75,8 @@ jobs:
             libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 \
             libxcb-shape0 libxcb-xkb1 libdbus-1-3 libfontconfig1 file
       - run: pip install -r requirements.txt pyinstaller
+      - name: Base DXCC de JCFLog (cty.csv)
+        run: curl -fsSL https://www.country-files.com/cty/cty.csv -o assets/cty.csv || echo "::warning::cty.csv non téléchargé (JCFLog le téléchargera au premier lancement)"
       - name: Bibliothèque FT8 (ft8_lib)
         run: |
           python native/build_ft8.py
@@ -91,7 +96,8 @@ jobs:
             --add-data "assets:assets" --add-binary "catpilot/libft8lib.so:." \
             --add-binary "palib/libportaudio.so.2:." \
             --add-binary "/usr/lib/x86_64-linux-gnu/libxcb-cursor.so.0:." \
-            --collect-all pyrtlsdrlib --collect-all sstv --hidden-import PySide6.QtTextToSpeech run.py
+            --collect-all pyrtlsdrlib --collect-all sstv --hidden-import PySide6.QtTextToSpeech \
+            --exclude-module PySide6.QtWebEngineWidgets --exclude-module PySide6.QtWebEngineCore run.py
       - name: Auto-test (FT8, FT4, PSK31, RTTY, SSTV, son)
         run: |
           QT_QPA_PLATFORM=offscreen timeout 120 ./dist/CATPilot/CATPilot --selftest selftest.txt || true
