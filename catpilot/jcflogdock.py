@@ -194,21 +194,81 @@ class JCFLogDock(QDockWidget):
         st = getattr(self.win, "_last", None)
         if st is not None:
             self.bridge.on_state(st)
+        # profils de JCFLog ↔ indicatifs de CAT Pilot (« Je trafique en » de l'ancien carnet)
+        self.sync_profiles()
+        jcf.e_profile.currentIndexChanged.connect(self._profile_chosen)
+        old_fill = self.win.logdock.fill_mycalls
+
+        def fill_mycalls(*a, **k):
+            r = old_fill(*a, **k)
+            self.sync_profiles()
+            return r
+        self.win.logdock.fill_mycalls = fill_mycalls
         if self._pending:
             self.prefill(*self._pending)
             self._pending = None
         return jcf
 
     def _default_profile(self, db):
-        """Premier lancement : profil de station repris des réglages de CAT Pilot."""
-        if db.get("profiles"):
-            return
+        """Profils de station de JCFLog = indicatifs de CAT Pilot (Carnet > Mes indicatifs et leur matériel)."""
+        from . import stations
+        from .logbook import my_calls
         s = self.win.settings
-        call = (s.value("mycall", "") or "").upper()
-        if not call:
+        calls = [c.upper() for c in my_calls(s) if c]
+        mat = {k.upper(): v for k, v in stations.load(s).items()}
+        home = (s.value("my_locator", "") or "").strip()
+        profs = db.get("profiles", []) or []
+        # les profils créés par CAT Pilot suivent ses réglages ; ceux faits à la main dans JCFLog restent
+        keep = [p for p in profs if not p.get("catpilot")]
+        mine = {p.get("station_callsign", "").upper() for p in keep}
+        old = {p.get("station_callsign", "").upper(): p for p in profs if p.get("catpilot")}
+        auto = []
+        for call in calls:
+            if call in mine:
+                continue
+            m = mat.get(call) or {}
+            loc = (m.get("loc") or home).strip()
+            loc = loc[:4].upper() + loc[4:].lower() if len(loc) > 4 else loc.upper()
+            op = max((x for x in call.split("/") if any(ch.isdigit() for ch in x)), key=len, default=call)
+            p = dict(old.get(call, {}))
+            p.update({"name": call, "station_callsign": call, "operator": op, "my_gridsquare": loc, "catpilot": True})
+            if m.get("rig"):
+                p["my_rig"] = m["rig"]
+            auto.append(p)
+        new = auto + keep
+        if new != profs:
+            db.set("profiles", new)
+        return new
+
+    def sync_profiles(self):
+        """Indicatifs modifiés dans CAT Pilot : liste « Profil » de JCFLog mise à jour, indicatif actif choisi."""
+        j = self.jcf
+        if j is None:
             return
-        grid = (s.value("my_locator", "") or "").upper()
-        db.set("profiles", [{"name": call, "station_callsign": call, "operator": call, "my_gridsquare": grid}])
+        self._default_profile(j.db)
+        self._syncing = True
+        try:
+            j.load_profiles()
+            cur = (self.win.settings.value("mycall", "") or "").upper()
+            for i, p in enumerate(j.profiles):
+                if p.get("station_callsign", "").upper() == cur:
+                    if j.e_profile.currentIndex() != i:
+                        j.e_profile.setCurrentIndex(i)
+                    break
+        finally:
+            self._syncing = False
+
+    def _profile_chosen(self, i):
+        """Profil choisi dans JCFLog : CAT Pilot passe sur cet indicatif (poste, port, locator)."""
+        if getattr(self, "_syncing", False) or self.jcf is None:
+            return
+        p = self.jcf.profile()
+        call = (p.get("station_callsign") or "").upper()
+        if call and call != (self.win.settings.value("mycall", "") or "").upper():
+            try:
+                self.win.set_active_call(call)
+            except Exception:
+                pass
 
     def _reload(self):
         if self.jcf:

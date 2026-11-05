@@ -1,6 +1,4 @@
-Nouveautés de la 0.28.1 (carnet : drapeaux et recherche d'indicatif) :
-- Drapeaux de retour dans le carnet JCFLog : à côté de l'indicatif pendant la saisie, en tête du cadre « Infos » et devant le pays dans la liste des QSO.
-- La recherche d'indicatif de CAT Pilot remplace celle de JCFLog : QRZ.com, HamQTH et QRZCQ avec vos comptes de Carnet > Réglages, callook.info, page publique QRZCQ et centre de la commune. Elle se lance pendant la frappe (ou Entrée) et remplit nom, QTH, locator, QSL via et zones.
-- Le cadre « Infos » résume la fiche trouvée (nom, QTH, locator, QSL via, LoTW, eQSL, sites utilisés), puis distance et cap recalculés avec le locator.
-- Les QSO enregistrés avant JCFLog (ou par FT8, WSJT-X, import) reçoivent automatiquement pays, DXCC, continent, zones et bande : JCFLog n'annonce plus « NOUVEAU DXCC ! » pour un pays déjà contacté.
-- Si la base cty.csv de JCFLog manque, les pays et zones sont pris dans cty.dat de CAT Pilot.
+Nouveautés de la 0.28.2 (carnet : mes indicatifs) :
+- Onglet « Ma Station » du carnet JCFLog : la liste « Profil » reprend tous vos indicatifs de Carnet > Mes indicatifs et leur matériel (F4JCF, F4JCF/P, FR/F4JCF/P…), avec leur poste et leur locator.
+- Choisir un profil remplace « Je trafique en » : les QSO suivants portent cet indicatif, et CAT Pilot passe sur le poste, le port et le locator de cet indicatif.
+- Un indicatif ajouté, modifié ou retiré dans CAT Pilot est aussitôt mis à jour dans JCFLog ; les profils créés à la main dans JCFLog sont conservés.
