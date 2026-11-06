@@ -1376,7 +1376,7 @@ class MainWindow(QMainWindow):
         zm.addAction(a)
         cm = mb.addMenu("Carnet")
         for label, slot in (("Ouvrir le carnet", lambda: self.b_log.setChecked(True)),
-                            ("Importer un fichier ADIF…", lambda: self.jcfdock.import_adif()),
+                            ("Importer des fichiers ADIF (un ou plusieurs)…", lambda: self.jcfdock.import_adif()),
                             ("Exporter tout le carnet en ADIF…", lambda: self.logdock.export_adif()),
                             ("Exporter l'activation du jour (POTA/SOTA)…", lambda: self.logdock.export_activation()),
                             (None, None),

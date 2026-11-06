@@ -2,6 +2,12 @@
 # Format : « == version | date | titre facultatif », puis une ligne par nouveauté (« - … »).
 # À compléter à chaque nouvelle version (l'auto-test vérifie que la version en cours y figure).
 
+== 0.28.5 | 2026-11-06 | carnet : importer plusieurs fichiers ADIF
+- Carnet > « Importer des fichiers ADIF (un ou plusieurs) » : sélectionnez plusieurs fichiers d'un coup dans la fenêtre de choix (Ctrl+clic, Maj+clic, Ctrl+A).
+- Glisser-déposer : déposez des fichiers .adi / .adif depuis l'Explorateur sur le carnet pour les importer.
+- Résumé par fichier (QSO importés, doublons ignorés) ; les doublons d'un fichier à l'autre sont aussi écartés.
+- Les anciens fichiers ADIF enregistrés en Windows-1252 gardent leurs accents.
+
 == 0.28.4 | 2026-11-06 | carnet : modifier plusieurs QSO à la fois
 - Carnet : sélectionnez plusieurs QSO (Ctrl+clic, Maj+clic), puis clic droit sur une colonne > « Modifier la colonne … pour les QSO sélectionnés » : la même valeur est mise dans tous (Mon activité, Mon indicatif, fréquence, date, heure, mode, références POTA/SOTA, QSL… toutes les colonnes).
 - Touche F2 sur une cellule : avec plusieurs QSO sélectionnés, choix entre « les QSO sélectionnés » et « ce QSO seulement ».

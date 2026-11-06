@@ -115,6 +115,7 @@ class Main(QMainWindow):
         self.rig_freq, self.contest, self.edit_ent = None, None, None
         self.setWindowTitle(f"JCFLog {VERSION}")
         self.setDockNestingEnabled(True)
+        self.setAcceptDrops(True)
         self._central()
         self._docks()
         self._menus()
@@ -321,7 +322,7 @@ class Main(QMainWindow):
             if sc: a.setShortcut(sc)
             menu.addAction(a); return a
         m = mb.addMenu("&Fichier")
-        add(m, "Importer ADIF…", self.import_adif); add(m, "Exporter ADIF (tout / filtre)…", self.export_all)
+        add(m, "Importer ADIF (un ou plusieurs fichiers)…", lambda *_: self.import_adif()); add(m, "Exporter ADIF (tout / filtre)…", self.export_all)
         add(m, "Exporter CSV…", self.export_csv); add(m, "Sauvegarder la base…", self.backup_to)
         m.addSeparator(); add(m, "Paramètres…", self.settings, "Ctrl+,"); m.addSeparator(); add(m, "Quitter", self.close, "Ctrl+Q")
         m = mb.addMenu("&Carnet de trafic")
@@ -643,19 +644,58 @@ class Main(QMainWindow):
             self.db.update(r["id"], {field: "Y"})
         self.apply_filter()
 
-    def import_adif(self):
-        p, _ = QFileDialog.getOpenFileName(self, "Importer ADIF", "", "ADIF (*.adi *.adif);;Tous (*)")
-        if not p: return
-        qs = adif.parse(open(p, encoding="utf-8", errors="replace").read())
-        for q in qs:
-            if not q.get("country") or not q.get("dxcc"):
-                e = self.dxcc.lookup(q.get("call"))
-                if e:
-                    q.setdefault("country", e["name"]); q.setdefault("dxcc", e["dxcc"]); q.setdefault("cont", e["cont"])
-            if not q.get("band") and q.get("freq"): q["band"] = geo.band_of(q["freq"])
-        n = self.db.add_many(qs)
-        QMessageBox.information(self, "Import", f"{n} QSO importés ({len(qs) - n} doublons ignorés).")
+    def import_adif(self, paths=None):
+        if not paths:
+            paths, _ = QFileDialog.getOpenFileNames(self, "Importer ADIF (un ou plusieurs fichiers)", "",
+                                                    "ADIF (*.adi *.adif *.ADI *.ADIF);;Tous (*)")
+        paths = [p for p in (paths or []) if os.path.isfile(p)]
+        if not paths: return
+        pd = None
+        if len(paths) > 1:
+            pd = QProgressDialog("Import des fichiers ADIF…", "Arrêter", 0, len(paths), self)
+            pd.setWindowTitle("Import ADIF"); pd.setWindowModality(Qt.WindowModal); pd.setMinimumDuration(0)
+        lines, tot_n, tot_q = [], 0, 0
+        for k, p in enumerate(paths):
+            name = os.path.basename(p)
+            if pd:
+                if pd.wasCanceled(): lines.append("… import arrêté."); break
+                pd.setValue(k); pd.setLabelText(f"{name}  ({k + 1} / {len(paths)})"); QApplication.processEvents()
+            try:
+                raw = open(p, "rb").read()
+                try: text = raw.decode("utf-8")
+                except UnicodeDecodeError: text = raw.decode("cp1252", errors="replace")   # anciens fichiers Windows
+                qs = adif.parse(text)
+            except Exception as ex:
+                lines.append(f"{name} : illisible ({ex})"); continue
+            for q in qs:
+                if not q.get("country") or not q.get("dxcc"):
+                    e = self.dxcc.lookup(q.get("call"))
+                    if e:
+                        q.setdefault("country", e["name"]); q.setdefault("dxcc", e["dxcc"]); q.setdefault("cont", e["cont"])
+                if not q.get("band") and q.get("freq"): q["band"] = geo.band_of(q["freq"])
+            n = self.db.add_many(qs) if qs else 0
+            tot_n += n; tot_q += len(qs)
+            lines.append(f"{name} : {n} QSO importés" + (f", {len(qs) - n} doublons ignorés" if len(qs) - n else "")
+                         + ("" if qs else " (aucun QSO trouvé)"))
+        if pd: pd.setValue(len(paths)); pd.close()
+        if len(paths) == 1:
+            msg = f"{tot_n} QSO importés ({tot_q - tot_n} doublons ignorés)."
+        else:
+            msg = (f"{len(paths)} fichiers : {tot_n} QSO importés, {tot_q - tot_n} doublons ignorés.\n\n"
+                   + "\n".join(lines[:40]) + ("\n…" if len(lines) > 40 else ""))
+        QMessageBox.information(self, "Import", msg)
         self.refresh_filters(); self.apply_filter()
+
+    # glisser-déposer des fichiers ADIF sur le carnet
+    def dragEnterEvent(self, ev):
+        if ev.mimeData().hasUrls() and any(u.toLocalFile().lower().endswith((".adi", ".adif")) for u in ev.mimeData().urls()):
+            ev.acceptProposedAction()
+
+    def dropEvent(self, ev):
+        paths = [u.toLocalFile() for u in ev.mimeData().urls() if u.toLocalFile().lower().endswith((".adi", ".adif"))]
+        if paths:
+            ev.acceptProposedAction()
+            QTimer.singleShot(0, lambda: self.import_adif(paths))
 
     def _save_adif(self, rows, title):
         p, _ = QFileDialog.getSaveFileName(self, title, "jcflog.adi", "ADIF (*.adi)")

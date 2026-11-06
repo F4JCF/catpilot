@@ -1,5 +1,5 @@
-Nouveautés de la 0.28.4 (carnet : modifier plusieurs QSO à la fois) :
-- Carnet : sélectionnez plusieurs QSO (Ctrl+clic, Maj+clic), puis clic droit sur une colonne > « Modifier la colonne … pour les QSO sélectionnés ». La même valeur est mise dans tous les QSO choisis, pour n'importe quelle colonne : Mon activité, Mon indicatif, fréquence, date, heure, mode, références POTA/SOTA, QSL…
-- Touche F2 sur une cellule : avec plusieurs QSO sélectionnés, vous choisissez entre « les QSO sélectionnés » et « ce QSO seulement ».
-- Les valeurs sont remises au bon format : date (2026-11-06 ou 06/11/2026), heure UTC (14:32), fréquence en MHz avec la bande mise à jour, majuscules. Une valeur fausse est refusée avec une explication.
-- Pour « Mon activité », tapez par exemple « SOTA F/AM-123 » ou « POTA FR-0019 ».
+Nouveautés de la 0.28.5 (carnet : importer plusieurs fichiers ADIF) :
+- Carnet > « Importer des fichiers ADIF (un ou plusieurs) » : dans la fenêtre de choix, sélectionnez plusieurs fichiers d'un coup (Ctrl+clic, Maj+clic, ou Ctrl+A pour tout le dossier).
+- Glisser-déposer : déposez des fichiers .adi ou .adif depuis l'Explorateur directement sur le carnet.
+- Un résumé donne, pour chaque fichier, les QSO importés et les doublons ignorés. Les doublons d'un fichier à l'autre sont aussi écartés.
+- Les anciens fichiers ADIF enregistrés sous Windows (Windows-1252) gardent leurs accents.

@@ -28,7 +28,7 @@ EXACT = {
     "Satellites": "Satellites", "Panoramique SDR": "SDR panadapter", "Accès à distance": "Remote access",
     "Mode compact": "Compact mode", "Mode nuit": "Night mode", "Taille du texte": "Text size",
     "Langue": "Language",
-    "Ouvrir le carnet": "Open the log", "Importer un fichier ADIF…": "Import an ADIF file…",
+    "Ouvrir le carnet": "Open the log", "Importer un fichier ADIF…": "Import an ADIF file…", "Importer des fichiers ADIF (un ou plusieurs)…": "Import ADIF files (one or more)…",
     "Exporter tout le carnet en ADIF…": "Export the whole log to ADIF…",
     "Exporter l'activation du jour (POTA/SOTA)…": "Export today's activation (POTA/SOTA)…",
     "Réglages : indicatif et HamQTH…": "Settings: callsign and HamQTH…",
