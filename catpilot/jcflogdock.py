@@ -190,6 +190,8 @@ class JCFLogDock(QDockWidget):
         self.fiche = Fiche(self, jcf)       # recherche HamQTH/QRZ/QRZCQ et drapeaux de CAT Pilot
         from .jcflogtools import Tools
         self.tools = Tools(self, jcf)       # « Compléter les QSO (lookup) »
+        from .jcflogedit import MultiEdit
+        self.multiedit = MultiEdit(self, jcf, getattr(self.fiche, "proxy", None))   # plusieurs QSO à la fois
         self._wait.hide()
         self._lay.addWidget(jcf)
         jcf.show()

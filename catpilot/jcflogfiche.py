@@ -34,14 +34,29 @@ class FlagProxy(QIdentityProxyModel):
         self.col, self._cache = col, {}
         self.setSourceModel(src)
 
+    on_edit = None          # fonction (ligne, clé, valeur) de jcflogtools : modification de plusieurs QSO
+
+    def setData(self, i, v, role=Qt.EditRole):
+        if role == Qt.EditRole and self.on_edit is not None:
+            try:
+                from .jcflog.main import COLS
+                row, key = self.sourceModel().rows[i.row()], COLS[i.column()][0]
+            except (AttributeError, IndexError):
+                return super().setData(i, v, role)
+            return bool(self.on_edit(row, key, "" if v is None else str(v)))
+        return super().setData(i, v, role)
+
     def data(self, i, role=Qt.DisplayRole):
-        if role == Qt.DisplayRole:
+        if role in (Qt.DisplayRole, Qt.EditRole):
             try:
                 from .jcflog.main import COLS
                 from .jcflogtools import display
-                txt = display(self.sourceModel().rows[i.row()], COLS[i.column()][0])
+                key = COLS[i.column()][0]
+                txt = display(self.sourceModel().rows[i.row()], key)
                 if txt is not None:
                     return txt
+                if role == Qt.EditRole and key in ("qso_date", "time_on"):
+                    return self.sourceModel().data(self.mapToSource(i), Qt.DisplayRole)
             except (AttributeError, IndexError):
                 pass
         if role == Qt.DecorationRole and i.column() == self.col:

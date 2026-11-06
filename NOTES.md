@@ -1,5 +1,5 @@
-Nouveautés de la 0.28.3 (carnet : compléter les QSO, mes activations) :
-- Carnet de trafic > « Compléter les QSO (lookup) » (ou clic droit sur des QSO) : nom, QTH, locator, département (France) et QSL via ajoutés aux QSO existants — QSO sélectionnés ou tous ceux à qui il manque une information — avec la recherche d'indicatif de CAT Pilot. Ce qui est déjà rempli est gardé, sauf si « Remplacer » est coché.
-- Nouvelle colonne « Mon activité » : la ou les références de vos activations (POTA, SOTA, BOTA, WWFF…), reprises des fichiers ADIF importés.
-- Nouvelle colonne « Mon indicatif » (F4JCF, F4JCF/P, FR/F4JCF/P…).
-- Les colonnes POTA, SOTA et WWFF affichent aussi les références du correspondant saisies dans CAT Pilot.
+Nouveautés de la 0.28.4 (carnet : modifier plusieurs QSO à la fois) :
+- Carnet : sélectionnez plusieurs QSO (Ctrl+clic, Maj+clic), puis clic droit sur une colonne > « Modifier la colonne … pour les QSO sélectionnés ». La même valeur est mise dans tous les QSO choisis, pour n'importe quelle colonne : Mon activité, Mon indicatif, fréquence, date, heure, mode, références POTA/SOTA, QSL…
+- Touche F2 sur une cellule : avec plusieurs QSO sélectionnés, vous choisissez entre « les QSO sélectionnés » et « ce QSO seulement ».
+- Les valeurs sont remises au bon format : date (2026-11-06 ou 06/11/2026), heure UTC (14:32), fréquence en MHz avec la bande mise à jour, majuscules. Une valeur fausse est refusée avec une explication.
+- Pour « Mon activité », tapez par exemple « SOTA F/AM-123 » ou « POTA FR-0019 ».
