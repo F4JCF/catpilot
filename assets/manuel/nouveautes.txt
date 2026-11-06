@@ -2,6 +2,12 @@
 # Format : « == version | date | titre facultatif », puis une ligne par nouveauté (« - … »).
 # À compléter à chaque nouvelle version (l'auto-test vérifie que la version en cours y figure).
 
+== 0.28.3 | 2026-11-06 | carnet : compléter les QSO, mes activations
+- Carnet de trafic > « Compléter les QSO (lookup) » (ou clic droit sur des QSO) : nom, QTH, locator, département (France) et QSL via ajoutés aux QSO existants, pour les QSO sélectionnés ou tous ceux à qui il manque une information, avec la recherche d'indicatif de CAT Pilot. Les informations déjà présentes sont gardées, sauf si vous cochez « Remplacer ».
+- Nouvelle colonne « Mon activité » : la ou les références de vos activations (POTA RE-0019, SOTA…, BOTA…), reprises des fichiers ADIF importés (MY_SIG, MY_SIG_INFO, MY_POTA_REF…).
+- Nouvelle colonne « Mon indicatif » (F4JCF, F4JCF/P, FR/F4JCF/P…).
+- Les colonnes POTA, SOTA et WWFF affichent aussi les références du correspondant saisies dans CAT Pilot.
+
 == 0.28.2 | 2026-11-05 | carnet : mes indicatifs
 - Onglet « Ma Station » du carnet JCFLog : la liste « Profil » reprend tous vos indicatifs de Carnet > Mes indicatifs et leur matériel (F4JCF, F4JCF/P, FR/F4JCF/P…), avec leur poste et leur locator.
 - Choisir un profil remplace « Je trafique en » : les QSO suivants portent cet indicatif, et CAT Pilot passe sur le poste, le port et le locator de cet indicatif.

@@ -152,6 +152,8 @@ class JCFLogDock(QDockWidget):
         if self.jcf is not None:
             return self.jcf
         from .jcflog import main as jm
+        from .jcflogtools import patch_columns
+        patch_columns()                     # colonnes « Mon indicatif » et « Mon activité »
         SharedDB = shared_db_class()
         db = SharedDB(self.win.log)
         self._default_profile(db)
@@ -186,6 +188,8 @@ class JCFLogDock(QDockWidget):
                     d.hide()
         from .jcflogfiche import Fiche
         self.fiche = Fiche(self, jcf)       # recherche HamQTH/QRZ/QRZCQ et drapeaux de CAT Pilot
+        from .jcflogtools import Tools
+        self.tools = Tools(self, jcf)       # « Compléter les QSO (lookup) »
         self._wait.hide()
         self._lay.addWidget(jcf)
         jcf.show()

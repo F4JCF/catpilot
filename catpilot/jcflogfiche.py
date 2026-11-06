@@ -35,6 +35,15 @@ class FlagProxy(QIdentityProxyModel):
         self.setSourceModel(src)
 
     def data(self, i, role=Qt.DisplayRole):
+        if role == Qt.DisplayRole:
+            try:
+                from .jcflog.main import COLS
+                from .jcflogtools import display
+                txt = display(self.sourceModel().rows[i.row()], COLS[i.column()][0])
+                if txt is not None:
+                    return txt
+            except (AttributeError, IndexError):
+                pass
         if role == Qt.DecorationRole and i.column() == self.col:
             try:
                 call = self.sourceModel().rows[i.row()].get("call") or ""

@@ -373,7 +373,17 @@ class HamQTH(QObject):
                 "country": "États-Unis", "grid": loc.get("gridsquare", ""),
                 "lat": loc.get("latitude", ""), "lon": loc.get("longitude", ""), "src": "callook.info"}, None
 
+    def lookup_now(self, call):
+        """Recherche synchrone (à appeler hors de l'interface) : dict d'infos, ou texte d'erreur."""
+        call = call.strip().upper()
+        if call in self.cache:
+            return self.cache[call]
+        return self._gather(call)
+
     def _lookup(self, call):
+        self.result.emit(call, self._gather(call))
+
+    def _gather(self, call):
         info, errors, sources = {}, [], []
         for fn in (self._qrz, self._hamqth, self._qrzcq, self._callook):
             try:
@@ -427,8 +437,7 @@ class HamQTH(QObject):
                 if pre.get(k) and not info.get(k):
                     info[k] = pre[k]
         if not info:
-            self.result.emit(call, " ; ".join(errors) or "Indicatif inconnu")
-            return
+            return " ; ".join(errors) or "Indicatif inconnu"
         info["sources"] = ", ".join(s for s in sources if s) or "préfixe"
         if not sources and not self.qrz_user and not self.user and not self.qrzcq_user:
             info["hint"] = "pour le nom et le QTH, ajoutez un compte HamQTH, QRZCQ ou QRZ.com (Carnet > Réglages)"
@@ -436,7 +445,7 @@ class HamQTH(QObject):
             info["hint"] = " ; ".join(errors)
         if sources:
             self.cache[call] = info
-        self.result.emit(call, info)
+        return info
 
 
 TABLE_COLS = ["Date", "UTC", "Mon indicatif", "Indicatif", "Nom", "Pays", "Dépt", "Fréquence", "Bande", "Mode", "Env.", "Reçu",
