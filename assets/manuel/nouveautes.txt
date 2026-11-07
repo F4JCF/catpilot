@@ -2,6 +2,13 @@
 # Format : « == version | date | titre facultatif », puis une ligne par nouveauté (« - … »).
 # À compléter à chaque nouvelle version (l'auto-test vérifie que la version en cours y figure).
 
+== 0.28.6 | 2026-11-07 | décodeur CW bien plus performant
+- Décodeur CW refait : il lit des signaux beaucoup plus faibles (décodage de Viterbi, filtre adapté à la vitesse, spectre moyenné pour trouver la note).
+- QSB : le niveau du signal est suivi en continu ; un signal qui s'enfonce de 15 dB reste lu.
+- Farnsworth, manipulation à la main : les espaces entre lettres et entre mots s'apprennent comme les points et les traits.
+- Un signal voisin ne fait plus perdre la station suivie ; la dérive de la note est suivie.
+- Vitesse affichée plus juste. Le texte arrive avec environ une seconde de retard (le temps de trancher).
+
 == 0.28.5 | 2026-11-06 | carnet : importer plusieurs fichiers ADIF
 - Carnet > « Importer des fichiers ADIF (un ou plusieurs) » : sélectionnez plusieurs fichiers d'un coup dans la fenêtre de choix (Ctrl+clic, Maj+clic, Ctrl+A).
 - Glisser-déposer : déposez des fichiers .adi / .adif depuis l'Explorateur sur le carnet pour les importer.

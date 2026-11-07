@@ -247,6 +247,7 @@ class CwDock(QDockWidget):
         else:
             if self._feed in wf.listeners:
                 wf.listeners.remove(self._feed)
+                self._show(self.decoder.flush())      # les dernières lettres en attente
             self.dec_timer.stop()
             wf.cw_marker = None
             self.bar.setValue(0)
@@ -325,7 +326,9 @@ class CwDock(QDockWidget):
             if not self._tx_hold:
                 self.decoder.reset()
             return
-        txt = self.decoder.feed(x, sr)
+        self._show(self.decoder.feed(x, sr))
+
+    def _show(self, txt):
         if txt:
             self.rx.moveCursor(QTextCursor.End)
             self.rx.insertPlainText(txt)
@@ -341,7 +344,7 @@ class CwDock(QDockWidget):
             self.lb_dec.setText("en pause pendant l'émission")
             return
         ok = d.snr >= 9 and (d._n / max(1, d.sr)) - d._tone_t < 6.0
-        self.bar.setValue(int(d.level * 100) if ok and d.key else 0)
+        self.bar.setValue(int(d.level * 100) if ok else 0)
         self.lb_dec.setText(f"{f:.0f} Hz · {d.wpm} mots/min · {d.snr:.0f} dB" if ok
                             else f"{f:.0f} Hz · pas de signal CW")
 

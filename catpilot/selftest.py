@@ -1,6 +1,6 @@
 """Auto-test de l'exécutable (lancé par GitHub Actions) : « CATPilot.exe --selftest fichier.txt ».
 
-Vérifie que les briques livrées avec le logiciel fonctionnent : FT8/FT4, PSK31, RTTY, SSTV,
+Vérifie que les briques livrées avec le logiciel fonctionnent : FT8/FT4, PSK31, RTTY, CW, SSTV,
 fichier des pays, fond de carte.
 """
 import math
@@ -57,6 +57,17 @@ def run(path):
         assert "F4JCF" in txt, txt
         return repr(txt)
 
+    def cw():
+        from .cwdecoder import CwDecoder, CwGenerator
+        sr, rng = 12000, np.random.default_rng(2)
+        g = CwGenerator("CQ DE F4JCF F4JCF K", wpm=25, freq=650, amp=0.05)
+        t = np.arange(int(sr * 2 * g.total)) / sr
+        x = (g.samples(t) + rng.normal(0, 0.03, len(t))).astype(np.float32)
+        d = CwDecoder()
+        txt = "".join(d.feed(x[i:i + 512], sr) for i in range(0, len(x), 512)) + d.flush()
+        assert "F4JCF" in txt, txt
+        return f"{txt.strip()!r}, {d.wpm} mots/min"
+
     def sstv_test():
         import sstv
         from PIL import Image
@@ -77,7 +88,7 @@ def run(path):
         assert len(d["land"]) > 100
         return f"{len(d['land'])} contours"
 
-    for name, fn in (("FT8", ft8), ("FT4", ft4), ("PSK31", psk), ("RTTY", rtty), ("SSTV", sstv_test),
+    for name, fn in (("FT8", ft8), ("FT4", ft4), ("PSK31", psk), ("RTTY", rtty), ("CW", cw), ("SSTV", sstv_test),
                      ("cty.dat", cty_test), ("carte", carte)):
         check(name, fn)
 
