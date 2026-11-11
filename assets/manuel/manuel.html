@@ -37,6 +37,11 @@ un raccourci est créé sur le bureau et dans le menu Démarrer.</li>
 <ul>
 <li>Téléchargez <code>CATPilot-x86_64.AppImage</code>, rendez-le exécutable (clic droit &gt; Propriétés &gt;
 « Autoriser l'exécution »), puis double-cliquez dessus. Ubuntu 22.04 et suivantes, Debian 12, Linux Mint 21, Fedora…</li>
+<li>Rangez d'abord le fichier dans un dossier où il restera (par exemple un dossier <code>Applications</code> dans votre dossier personnel).
+Au premier lancement, CAT Pilot pose son <b>icône sur le Bureau</b> et l'ajoute au <b>menu des applications</b>.
+Si le Bureau affiche l'icône barrée, clic droit sur l'icône &gt; « Autoriser le lancement ».
+Si vous déplacez le fichier, relancez-le une fois depuis son nouvel emplacement : l'icône est remise à jour.
+Une icône supprimée du Bureau n'est pas recréée.</li>
 <li>Une seule fois, autorisez l'accès aux ports série, puis fermez et rouvrez la session :
 <code>sudo usermod -aG dialout $USER</code></li>
 <li>Si le port reste « occupé », retirez ModemManager : <code>sudo apt remove modemmanager</code>.</li>

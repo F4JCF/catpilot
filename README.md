@@ -18,6 +18,8 @@ vers WSJT-X, JTDX, Log4OM, N1MM… grâce à un serveur compatible rigctld.
   exécutable (clic droit > Propriétés > « Autoriser l'exécution », ou
   `chmod +x CATPilot-x86_64.AppImage`), puis double-cliquer dessus. Aucune installation.
   Fonctionne sur Ubuntu 22.04 et suivantes, Debian 12, Linux Mint 21, Fedora 37… (64 bits).
+- Au premier lancement, CAT Pilot pose son icône sur le Bureau et dans le menu des applications.
+  Ranger d'abord le fichier dans un dossier où il restera (ex. `~/Applications`).
 - Une seule fois, autoriser l'accès aux ports série, puis fermer la session et la rouvrir :
   `sudo usermod -aG dialout $USER`
 - Le FT-991A apparaît en `/dev/ttyUSB0` (Enhanced, CAT) et `/dev/ttyUSB1` (Standard, CW/PTT).

@@ -2,6 +2,10 @@
 # Format : « == version | date | titre facultatif », puis une ligne par nouveauté (« - … »).
 # À compléter à chaque nouvelle version (l'auto-test vérifie que la version en cours y figure).
 
+== 0.28.7 | 2026-11-11 | Linux : icône sur le Bureau
+- Linux : au premier lancement, icône CAT Pilot posée sur le Bureau et ajoutée au menu des applications.
+- L'icône suit le fichier s'il est déplacé ; une icône supprimée n'est pas recréée.
+
 == 0.28.6 | 2026-11-07 | décodeur CW bien plus performant
 - Décodeur CW refait : il lit des signaux beaucoup plus faibles (décodage de Viterbi, filtre adapté à la vitesse, spectre moyenné pour trouver la note).
 - QSB : le niveau du signal est suivi en continu ; un signal qui s'enfonce de 15 dB reste lu.

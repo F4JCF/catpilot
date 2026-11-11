@@ -2602,6 +2602,9 @@ def main():
     first_run = not w.settings.value("geometry")
     w.show()
     w.fitter.start(first_run)
+    if sys.platform.startswith("linux"):
+        from . import linux_shortcut
+        QTimer.singleShot(2000, linux_shortcut.install)   # icônes du menu et du Bureau
     app._dialog_fitter = screenfit.DialogFitter(app)
     app.installEventFilter(app._dialog_fitter)
     sys.exit(app.exec())
